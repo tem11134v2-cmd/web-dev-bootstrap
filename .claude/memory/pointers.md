@@ -65,10 +65,11 @@ type: reference
 
 ## Деплой и скрипты
 
-- **package.json scripts:** `dev` (порт 4000), `build`, `start` (порт 3000),
-  `lint`, `compress` (sharp оптимизация изображений).
-- **Деплой схема A:** локально `npm run build && pm2 restart [project]`.
-- **Деплой схема B:** `git push origin dev` → PR → merge в main → GitHub Actions.
+- **package.json scripts:** `dev` (порт 3000, локально на Mac), `build`,
+  `start` (порт через PORT=... при `pm2 start`), `lint`, `compress`
+  (sharp оптимизация изображений).
+- **Деплой:** `git push origin dev` → preview на `dev.[domain]` → PR →
+  merge в `main` → GitHub Actions катит prod.
 
 ## Что добавлять сюда
 

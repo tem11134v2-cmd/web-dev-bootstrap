@@ -1,143 +1,149 @@
 # Deploy
 
-Две схемы деплоя на VPS. Выбери одну до старта проекта — переход потом возможен, но болезненный. Серверная инфраструктура и nginx — в `docs/deploy-server-setup.md`.
+Одна схема на всё: разработка на Mac → push в GitHub → GitHub Actions разворачивает на VPS.
 
-## Какую схему выбрать
+## Общая картина
 
-| Признак | A: Solo (dev=prod) | B: Client + CI/CD |
-|---|---|---|
-| Кто работает с кодом | Только разработчик | Разработчик + потенциально команда |
-| Кто владелец инфры | Разработчик | Заказчик |
-| Передача проекта в будущем | Маловероятна | Обязательна |
-| GitHub remote | Опционально (или вообще нет) | Обязательно (owner = заказчик) |
-| Preview-окружение | Нет (или ручной port) | Есть (`dev.domain.com`) |
-| Деплой | `pm2 restart` локально | `git push` → GitHub Actions |
-| Когда выбирать | Свой проект, MVP, ранний этап | Клиентский проект сразу |
-
-**По умолчанию для клиентских проектов — B.** A — только когда уверен, что проект твой и долго.
-
----
-
-## Схема A: Solo (dev = prod на одном VPS)
-
-**Архитектура:**
 ```
-VPS
-└── ~/projects/{project}/   ← одна папка, одна ветка main
-    ├── npm run dev   → port 4000   (когда нужен hot-reload)
-    └── npm run start → port 3000   (production, под PM2)
-       PM2 → nginx → SSL → Internet
+┌─────────────────────┐     git push      ┌──────────────┐
+│  Mac (Claude Code)  │ ─────────────────▶│  GitHub repo │
+│  ~/projects/{site}  │                   │  branches:   │
+│  localhost:3000     │                   │  - main      │
+└─────────────────────┘                   │  - dev       │
+                                          └──────┬───────┘
+                                                 │ GitHub Actions
+                                                 │ (on push)
+                                                 ▼
+                                   ┌─────────────────────────┐
+                                   │   VPS (ты настроил      │
+                                   │   руками, см.           │
+                                   │   server-manual-setup)  │
+                                   │                         │
+                                   │  ~/prod/{site}/  :3010  │ ← main
+                                   │  ~/dev/{site}/   :4010  │ ← dev (опц.)
+                                   │         ▼               │
+                                   │       nginx + SSL       │
+                                   │    domain.com           │
+                                   │    dev.domain.com (опц.)│
+                                   └─────────────────────────┘
 ```
 
-**Деплой (после правок):**
+## Собственность
+
+- **Mac и локальная папка** — у разработчика.
+- **GitHub-репо** — владелец обычно заказчик; разработчик — collaborator. Для собственных проектов разработчик = владелец.
+- **VPS, домен, SSL** — заказчик (или разработчик для собственных).
+- При уходе разработчика: удалить его из GitHub collaborators + снять его SSH-ключ с VPS (если был) — всё продолжает работать. См. `specs/12-handoff.md`.
+
+## Ветки
+
+- `main` — прод. Пушим сюда **только через Pull Request** (protected branch).
+- `dev` — интеграционная ветка для preview. Разработчик пушит сюда напрямую.
+- Feature-ветки (`feat/*`, `fix/*`) — по желанию для крупных задач с PR в `dev`.
+
+Коммиты — на английском, по подзадачам (см. `docs/workflow.md`).
+
+## Preview для заказчика
+
+По желанию проекта. Варианта два:
+
+1. **Поддомен `dev.domain.com` на том же VPS.** GitHub Actions деплоит ветку `dev` в папку `~/dev/{site}/` с отдельным портом (4xxx) и отдельным server_name в nginx. Плюс: всегда свежая копия, та же среда что и прод. Минус: ещё один PM2-процесс + nginx-секция + SSL.
+2. **Cloudflare Tunnel / ngrok с Mac.** Быстрый временный публичный URL к `localhost:3000`. Плюс: никакой инфры. Минус: работает только пока Mac запущен и тоннель открыт — на продакшн-preview не годится.
+
+Для клиентских проектов по умолчанию — вариант 1. Для MVP/демок — 2.
+
+## Как выглядит GitHub Actions
+
+Файл `.github/workflows/deploy-prod.yml` (создаётся в спеке `01b-server-handoff`):
+
+```yaml
+name: Deploy prod
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+      - run: |
+          ssh -o StrictHostKeyChecking=no deploy@${{ secrets.SERVER_IP }} "
+            cd ~/prod/${{ vars.SITE_NAME }} && \
+            git pull origin main && \
+            npm ci && \
+            npm run build && \
+            pm2 restart ${{ vars.SITE_NAME }}-prod
+          "
+```
+
+Аналогичный `deploy-dev.yml` для ветки `dev` — если заказчику нужен preview.
+
+**Секреты и переменные GitHub:**
+- `DEPLOY_SSH_KEY` (secret) — приватный ключ, публичную часть ты положил в `~/.ssh/authorized_keys` на VPS руками.
+- `SERVER_IP` (secret) — IP сервера.
+- `SITE_NAME` (variable) — имя проекта, оно же имя папки на VPS и имя PM2-процесса.
+
+## Ежедневный цикл
+
+На Mac:
 ```bash
-npm run build     # включает sharp-сжатие public/
-pm2 restart {project}
+cd ~/projects/{site}
+npm run dev                 # localhost:3000
+# правим код через Claude Desktop
+git add -A && git commit -m "feat: ..."
+git push origin dev          # deploy-dev.yml → dev.domain.com
+# проверили, всё ок → PR dev → main → merge → deploy-prod.yml → domain.com
 ```
 
-Без `git push`, без CI, без второй папки. Если правишь на VPS через `claude` — `git commit` опционален (для истории), не обязателен для деплоя.
+Claude Desktop в это время:
+- работает с файлами в `~/projects/{site}`;
+- пушит через `git` / `gh` (не через SSH на сервер — туда он не ходит).
 
-**Преимущества:** простота, мгновенный деплой, минимум движущихся частей.
-**Минусы:** нет preview-окружения, нет защиты от поломки prod, передача заказчику требует миграции.
+## Откат прода
 
-**Когда A → когда переходить на B:**
-- Появилась команда (≥2 разработчика).
-- Заказчик попросил доступы к коду / инфре.
-- Нужны preview-ссылки для согласования макетов.
-- Релизы стали рискованными (большие фичи, регрессии).
-
----
-
-## Схема B: Client + GitHub Actions
-
-**Архитектура:**
-```
-VPS заказчика
-├── ~/dev/{project}/    ← ветка dev, port 4000, dev.domain.com
-│                          (preview для заказчика)
-│      git push origin dev
-│             │
-│        GitHub repo (owner = заказчик)
-│             │
-│   PR dev → main → review → merge
-│             │
-│        GitHub Actions
-│             │
-└── ~/prod/{project}/   ← ветка main, port 3000, domain.com
-                          (git pull + build + pm2 restart автоматом)
-```
-
-**Почему две папки:**
-- Изоляция dev от prod — сломать dev не ломает prod.
-- Заказчик видит preview на `dev.domain.com` до релиза.
-- Два PM2-процесса, два nginx-поддомена.
-- Для крупных проектов prod выносится на отдельный VPS.
-
-**Собственность:**
-- VPS, домен, GitHub-репо — на аккаунте **заказчика**.
-- Разработчик — collaborator в GitHub + SSH-юзер на VPS.
-- При уходе разработчика: удалить SSH-ключ + collaborator — всё работает.
-
-**Настройка инфры (VPS, GitHub Actions, nginx, SSL, Cloudflare):** см. `docs/deploy-server-setup.md` и `specs/01-infrastructure.md`.
-
----
-
-## Ежедневная работа
-
-**Схема A:**
-```bash
-# Локально на VPS или удалённо
-npm run build && pm2 restart {project}
-# Опционально git commit для истории
-```
-
-**Схема B:**
-```bash
-ssh deploy@server && cd ~/dev/{project} && claude
-# Правки → git add/commit/push origin dev
-# Preview на dev.domain.com (нужен pm2 restart {project}-dev — отдельный workflow или вручную)
-# Релиз: PR dev → main → merge → GitHub Actions автоматом
-```
-
-## Откат при поломке prod
+Если релиз сломал прод — зайти на VPS руками:
 
 ```bash
-ssh deploy@server && cd ~/prod/{project}
+ssh deploy@{server-ip}
+cd ~/prod/{site}
 git log --oneline -5
 git reset --hard {commit-hash}
-npm run build && pm2 restart {project}-prod
+npm ci && npm run build && pm2 restart {site}-prod
 ```
 
-В схеме A — то же, без второй папки. Полезно держать `git tag stable-YYYY-MM-DD` после успешных релизов.
+После успешного релиза полезно ставить тег `git tag stable-YYYY-MM-DD && git push --tags` — чтобы было откуда откатываться.
 
-## Масштабирование: когда выносить prod на отдельный VPS
+## Git-дисциплина
 
-Сигналы:
-- CPU постоянно > 70% или RAM > 80%.
-- Билд тормозит сайт > 10 секунд.
-- Трафик > 10K уникальных в сутки.
-- Появилась БД с большим объёмом.
+- **Никогда не пушим напрямую в `main`** — только через PR из `dev` (protected branch защищает).
+- **Не коммитим:** `.env*`, `data/leads.json`, `node_modules/`, сборки, логи. См. `.gitignore`.
+- Перед merge `dev → main` — проверь preview на `dev.domain.com` (если настроен).
+- Коммит-сообщения на английском, краткие, в настоящем времени (`fix: handle empty form`, не `fixed`).
 
-Как вынести (схема B):
-1. Заказать второй VPS (мощнее), пройти первичную настройку.
-2. Перенести prod на новый VPS, dev остаётся на старом.
-3. В GitHub Actions workflow поменять IP в SSH-команде.
-4. Домены: `domain.com` → новый IP, `dev.domain.com` → старый.
+## Связанные файлы
 
-## Передача проекта заказчику (если стартовал по схеме A)
+- **Ручной сетап VPS** (делаешь ты, один раз на VPS): `docs/server-manual-setup.md`
+- **Добавить сайт на готовый VPS** (делаешь ты, один раз на сайт): `docs/server-add-site.md`
+- **Как уживаются несколько сайтов:** `docs/server-multisite.md`
+- **Подключение домена:** `docs/domain-connect.md`
+- **Cloudflare** (опционально): секция ниже.
+- **Передача проекта заказчику:** `specs/12-handoff.md`.
 
-1. Перенеси код в GitHub-репо с owner = заказчик.
-2. Заведи на VPS второй пользователь / новый VPS под prod.
-3. Настрой `.github/workflows/deploy.yml` и две папки `dev`/`prod` (см. `deploy-server-setup.md`).
-4. Сними свои SSH-ключи с VPS, выйди из collaborators.
-5. Передай: SSH-доступ, домен, GitHub owner-права, инструкцию.
+## Cloudflare (опционально, поверх схемы)
 
-Подробный runbook — `specs/12-handoff.md`.
+**Когда подключать:** трафик > 1k/день, нужны DDoS-защита / WAF / global CDN, или просто бесплатный edge-кэш.
 
-## Git-дисциплина при деплое
+**Базовая настройка:**
+1. Делегируй NS домена на Cloudflare (через регистратора).
+2. SSL/TLS mode: **Full (strict)** — чтобы CF проверял твой Let's Encrypt.
+3. Always Use HTTPS: ON.
+4. Auto Minify (CSS/JS/HTML): OFF — Next уже делает.
+5. Brotli: ON.
+6. Caching → Browser Cache TTL: Respect Existing Headers.
+7. Page Rules для статики `*/_next/static/*` — Cache Everything, Edge TTL = 1 month.
 
-- **Схема A:** работа на `main`, commit-by-task для истории.
-- **Схема B:** работа на `dev`, никогда напрямую в `main` — только PR.
-- Сообщения на английском, краткие.
-- Не коммить: `.env`, `data/leads.json`, `node_modules/`, лог-файлы.
-- Перед merge в `main` — проверить на `dev.domain.com`.
+**Подводные камни:**
+- Cloudflare кеширует HTML — после релиза контент может не обновиться. Решение: не кэшировать `.html`, либо purge по API в GitHub Actions после деплоя.
+- IP клиента в nginx-логах = IP Cloudflare. Чтобы видеть реальный — `set_real_ip_from` + `real_ip_header CF-Connecting-IP` в nginx (см. `docs/server-manual-setup.md`).

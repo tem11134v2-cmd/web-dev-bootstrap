@@ -35,6 +35,7 @@ type: project
 <!-- Краткая хронология. Без деталей — детали в коммитах. -->
 
 - [YYYY-MM-DD] `00-brief.md` — done
-- [YYYY-MM-DD] `01-infrastructure.md` — done, схема [A/B]
+- [YYYY-MM-DD] `01a-local-setup.md` — done
+- [YYYY-MM-DD] `01b-server-handoff.md` — done (workflow + nginx положены в репо, ждём подтверждения от пользователя что прошёл `docs/server-add-site.md`)
 - [YYYY-MM-DD] `02-project-init.md` — done
 - [...]

@@ -3,7 +3,7 @@
 ## KB files to read first
 
 - docs/performance.md (полностью — все разделы и Methodology § 13)
-- docs/deploy-server-setup.md (nginx + Cache-Control)
+- docs/server-add-site.md (nginx + Cache-Control, для справки — применяет на сервере человек)
 - `next.config.ts`
 - `app/page.tsx` + типовая страница услуги
 
@@ -98,7 +98,7 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
     gzip_static on;
     ```
 24. Brotli — если `nginx -V 2>&1 | grep brotli` показывает поддержку, включить. Если нет — пропустить (gzip_static достаточно)
-25. Cache-Control: immutable на статику, revalidate на HTML — проверить (шаблон в docs/deploy-server-setup.md)
+25. Cache-Control: immutable на статику, revalidate на HTML — проверить (шаблон nginx в docs/server-add-site.md)
 
 ### 10. next.config — финальная проверка
 

@@ -1,19 +1,36 @@
-# web-dev-bootstrap v2.0
+# web-dev-bootstrap v2.1
 
-Промпт-пакет для Claude Code, который превращает его в дисциплинированного
+Промпт-пакет для Claude Code Desktop, который превращает его в дисциплинированного
 frontend-разработчика конверсионных сайтов на Next.js. Не зависимость, не
 библиотека — просто набор `.md` файлов, которые Claude читает по требованию
 и по которым выстраивает работу над проектом.
+
+**Воркфлоу:** разработка локально на Mac через Claude Desktop → `git push` в GitHub
+→ GitHub Actions катит на VPS. Сервер разработчик настраивает руками по чек-листам
+в `docs/server-*.md` — Claude в эту часть не лезет.
 
 ## Что внутри
 
 ```
 CLAUDE.md                  — вход для Claude: правила, стек, триггеры памяти
-docs/                      — Knowledge Base (13 файлов, ≤200 строк каждый)
+docs/                      — Knowledge Base (≤200 строк каждый)
   INDEX.md                   → карта: какой файл когда читать (начни здесь)
-specs/                     — последовательность задач (14 основных + опциональные)
+  # Для Claude:
+  workflow.md, stack.md, architecture.md, design-system.md,
+  content-layout.md, forms-and-crm.md, legal-templates.md,
+  seo.md, performance.md, conversion-patterns.md, deploy.md
+  # Для человека (чек-листы):
+  server-manual-setup.md     → разовая настройка свежего VPS
+  server-add-site.md         → подключение сайта на готовый VPS
+  server-multisite.md        → несколько сайтов на одном VPS
+  domain-connect.md          → A-записи, Cloudflare
+specs/                     — последовательность задач
   INDEX.md                   → граф зависимостей, как запускать спеку
-  00-brief.md … 13-extend-site.md
+  00.5-new-project-init.md   → ритуал разработчика до запуска Claude
+  00-brief.md
+  01a-local-setup.md         → Mac: тулчейн, память
+  01b-server-handoff.md      → Claude генерит deploy workflows + nginx-шаблон
+  02-project-init.md … 13-extend-site.md
   optional/                  → quiz, ecommerce, i18n, migrate-from-existing
   templates/                 → spec-template, page-spec-template
   examples/                  → живые образцы зрелых спек (референс формата)
@@ -23,23 +40,32 @@ _BUILD/                    — служебное: changelog, migration-map, cla
 
 ## Как использовать
 
-1. **Скопируй папку** в корень нового проекта (или раскатай из template-репо).
-2. **Заполни `CLAUDE.md`**: либо правь текущий live-вариант, либо скопируй
-   `_BUILD/claude-md-template.md` → `CLAUDE.md` и подставь `[плейсхолдеры]`.
-3. **Запусти Claude Code** в папке проекта. Первая команда:
-   ```
-   Read CLAUDE.md and specs/INDEX.md. Then open specs/00-brief.md.
-   ```
+1. **Разовая подготовка Mac (первый раз в жизни):** установи `node` 22+, `git`,
+   `gh`, залогинься в `gh auth login`, прокинь SSH-ключ на GitHub.
+2. **Разовая подготовка VPS (первый раз для этого сервера):** пройди
+   `docs/server-manual-setup.md` — создай пользователя, поставь стек, swap.
+3. **Старт нового сайта** — пройди `specs/00.5-new-project-init.md`:
+   - Создай `~/projects/{site}/` на Mac.
+   - Раскатай template: `gh repo create {owner}/{site} --template tem11134v2-cmd/web-dev-bootstrap --private --clone`.
+   - Открой Claude Desktop, `Select folder` → эту папку.
+   - Первая команда в чате:
+     ```
+     Read CLAUDE.md and specs/INDEX.md. Then open specs/00-brief.md.
+     ```
 4. **Идём по спекам 00 → 13.** Одна спека = одна сессия Claude = один
    коммит-набор. Между спеками — `/clear` и новая сессия.
-5. **После каждой спеки** Claude обновляет `.claude/memory/project_state.md`
+5. **Сервер:** после `01b-server-handoff` Claude положит в репо workflow и nginx-шаблон.
+   Ты проходишь `docs/server-add-site.md` и `docs/domain-connect.md` — сайт подключается
+   за ~30 минут.
+6. **После каждой спеки** Claude обновляет `.claude/memory/project_state.md`
    (триггеры описаны в `CLAUDE.md`).
 
 ## Требования
 
-- Claude Code (CLI или IDE-расширение)
-- Node.js 20+ (для целевого проекта)
-- VPS с Ubuntu 22.04+ для деплоя (см. `docs/deploy.md` — две схемы)
+- Claude Code Desktop (macOS/Windows)
+- Node.js 22+ на Mac и VPS
+- `gh` CLI на Mac (для `gh repo create --template` и авторизации)
+- VPS с Ubuntu 22.04+ для деплоя (см. `docs/server-manual-setup.md`)
 
 ## Навигация
 
@@ -63,8 +89,10 @@ _BUILD/                    — служебное: changelog, migration-map, cla
 
 ## Версия
 
-v2.0.0 (2026-04-13). Переход с v1.7 (один `.md`-файл на 2128 строк) на
-структурированную папку. См. `_BUILD/changelog.md` для breaking changes.
+v2.1.0 (2026-04-24). Переход с серверной разработки (Claude на VPS через SSH) на
+локальную десктопную: Mac → GitHub → VPS. Убраны схемы A/B, остался один
+консистентный воркфлоу. Серверные чек-листы выделены в `docs/server-*.md`. См.
+`_BUILD/changelog.md` для полной истории.
 
 ## Лицензия
 

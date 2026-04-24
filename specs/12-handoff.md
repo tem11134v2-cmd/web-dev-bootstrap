@@ -2,8 +2,9 @@
 
 ## KB files to read first
 
-- docs/deploy.md (раздел «Передача проекта заказчику»)
-- docs/deploy-server-setup.md (раздел «Регулярное обслуживание», «Типовые проблемы»)
+- docs/deploy.md (раздел «Собственность», «Откат прода»)
+- docs/server-manual-setup.md (раздел «Обслуживание», «Типовые проблемы»)
+- docs/server-add-site.md (раздел «Частые проблемы»)
 - `.claude/memory/references.md` (всё что заказчик должен получить)
 - `.claude/memory/decisions.md` (что заказчик должен знать о решениях)
 
@@ -17,7 +18,7 @@
 
 1. Убедиться что у заказчика есть/получены:
    - **Anthropic аккаунт** (для Claude Code) — свой, не разработчика
-   - **GitHub аккаунт + ownership репозитория** (схема B). Разработчик — collaborator, может быть удалён
+   - **GitHub аккаунт + ownership репозитория.** Разработчик — collaborator, может быть удалён
    - **VPS root SSH доступ** (или хотя бы доступ к панели управления VPS)
    - **Домен** в личном реестре регистратора
    - **Cloudflare аккаунт** (если используется)
@@ -52,18 +53,15 @@ ssh deploy@[ip]
 sudo certbot renew                  # обычно auto, но можно вручную
 sudo systemctl reload nginx
 
-## Сайт работает, но обновления не появились (схема A)
-
-ssh deploy@[ip]
-cd ~/[project]                      # или /var/www/[project]
-git pull                            # если использовали remote
-npm run build && pm2 restart [project]
-
-## Сайт работает, но обновления не появились (схема B)
+## Сайт работает, но обновления не появились
 
 # Проверить GitHub Actions: Settings → Actions → последний run
 # Если упал — кликнуть "Re-run failed jobs"
-# Если не запустился — проверить что merge dev→main произошёл
+# Если не запустился — проверить что merge dev→main произошёл и защищённая ветка не блокирует
+# В крайнем случае — ручной pull на сервере:
+ssh deploy@[ip]
+cd ~/prod/[project]
+git pull origin main && npm ci && npm run build && pm2 restart [project]-prod
 
 ## Билд падает с OOM (out of memory)
 
@@ -76,17 +74,17 @@ sudo mkswap /swapfile && sudo swapon /swapfile
 ## Откат на последнюю рабочую версию
 
 ssh deploy@[ip]
-cd ~/[project]
+cd ~/prod/[project]
 git log --oneline -10               # найти последний рабочий коммит
 git reset --hard [commit-hash]
-npm run build && pm2 restart [project]
+npm ci && npm run build && pm2 restart [project]-prod
 
 ## Лиды не доходят в CRM
 
 # 1. Проверить fallback: ssh deploy@[ip] && tail data/leads.json
 # 2. Если лиды есть в leads.json но нет в CRM — токен/webhook слетел
 # 3. Обновить .env (AMO_CRM_TOKEN или BITRIX_WEBHOOK_URL)
-# 4. pm2 restart [project]
+# 4. pm2 restart [project]-prod
 
 ## Сайт работает медленно
 
@@ -120,17 +118,17 @@ df -h                               # свободное место
 
 8. Коммит `chore: add HANDOFF.md`
 9. Тег `v1.0` — релизная версия
-10. Push в main (схема B) или просто локальный коммит (схема A)
+10. Push тег в GitHub: `git push origin v1.0` (сам коммит должен быть уже в `main` через PR).
 
 ### 7. Передача документации
 
 11. Заказчику отправить:
-    - Ссылку на `HANDOFF.md` в репо (схема B) или PDF/копию (схема A)
+    - Ссылку на `HANDOFF.md` в репо
     - Список всех ID/URL из `references.md` (можно скопировать в .md и отправить)
     - Контакты для вопросов
 12. Провести короткую видео-встречу или Loom-видео (10-15 мин), показать:
     - Где статистика, где CRM, где сайт
-    - Как открыть Claude Code на VPS и попросить правки
+    - Как открыть GitHub-репо, как запустить Claude Desktop локально и попросить правки
     - Что делать если упало
 
 ### 8. Зафиксировать передачу
