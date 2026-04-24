@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.1.3 — 2026-04-24 · Handoff and migration playbooks
+
+Закрыли белое пятно: что делать когда сайт передаётся заказчику или переезжает на другой VPS. Спеки `12-handoff` и новая `14-migrate` покрывают все сценарии, которые Timur использует на практике.
+
+- **`specs/12-handoff.md` переписан под три модели handoff'а:** H1 (full transfer — дефолт), H2 (client-owned, dev operates), H3 (read-only). HANDOFF.md-шаблон теперь содержит runbook + monthly maintenance + инструкцию по самостоятельному отзыву прав разработчика.
+- **Новая `specs/14-migrate.md`** с четырьмя сценариями: M1 (scaling), M2 (handoff), M3 (emergency), M4 (clone to new domain). Scp runtime-данных, DNS switch, **7-day soak** перед decommission.
+- **Зафиксированы дефолтные правила:**
+  - `data/leads.json` — fallback, не источник истины (источник — CRM).
+  - 7 дней между DNS switch и выключением старого VPS.
+  - Single-Claude модель — мульти-разработчик не поддерживается; при handoff'е Claude заказчика заменяет Claude разработчика, а не идёт параллельно.
+- `specs/INDEX.md` — спека `14-migrate` добавлена в основной поток (опциональная, после 12 или между 10/11 при масштабировании).
+
 ## v2.1.2 — 2026-04-24 · Security hardening pass
 
 Добавили разумные дефолты поверх базового bootstrap. Применены и проверены на том же Timeweb VPS.
