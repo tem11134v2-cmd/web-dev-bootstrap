@@ -27,7 +27,7 @@ Deploy: git push → GitHub Actions → PM2 + Nginx + Let's Encrypt на VPS (с
 - Read relevant `docs/` files listed in spec's "KB files to read first" — never load all docs
 - Read `.claude/memory/INDEX.md` at session start, then load only relevant memory files
 - Work on `dev` branch, merge to `main` only via PR (`main` is protected)
-- Never push to `main` directly. Never SSH into the VPS from Claude Code — server setup is the developer's manual task (see docs/server-*.md)
+- Never push to `main` directly. SSH to the VPS is allowed for setup/maintenance (see docs/server-*.md) — use the developer's key at `~/.ssh/id_ed25519`; run batched idempotent scripts, not ad-hoc interactive edits
 - Commit after each completed sub-task with English messages
 - Max 150 lines per component — split if longer
 - ONLY use shadcn/ui components — never invent custom UI
@@ -63,8 +63,8 @@ docs/performance.md        — Core Web Vitals, methodology (LCP breakdown), bud
 docs/conversion-patterns.md — CTA placement, social proof, lead magnets, quiz
 docs/legal-templates.md    — RU 152-ФЗ: cookie banner, PDn consent, privacy/terms
 
-# Для человека, не для Claude (ссылайся, не исполняй):
-docs/server-manual-setup.md — разовая настройка свежего VPS
+# Серверные чек-листы (Claude исполняет через SSH):
+docs/server-manual-setup.md — разовая настройка свежего VPS (scripts/bootstrap-vps.sh)
 docs/server-add-site.md     — подключение сайта на готовый VPS
 docs/server-multisite.md    — как уживаются несколько сайтов
 docs/domain-connect.md      — A-записи, Cloudflare, dig-проверка

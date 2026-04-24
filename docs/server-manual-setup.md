@@ -1,153 +1,123 @@
-# Server: Manual Setup (разовый, на свежий VPS)
+# Server: Initial bootstrap
 
-**Это инструкция для человека, не для Claude.** Claude Code в эту папку не ходит — он только пушит в GitHub. Ты выполняешь этот чек-лист руками по SSH.
+Разовая настройка свежего Ubuntu-VPS. Источник истины — `scripts/bootstrap-vps.sh` (идемпотентный, протестированный на Ubuntu 24.04 Timeweb в апреле 2026). Этот документ — описание **как** этот скрипт использовать и **почему** он делает именно это.
 
-Проходится один раз на каждый **новый VPS**. Если VPS уже настроен — открывай `docs/server-add-site.md` для подключения ещё одного сайта.
+**Формат работы:** Claude запускает скрипт по SSH сам, наблюдает результат. Разработчик подтверждает доступ к серверу и IP.
 
-## 0. Требования к VPS
+## Что нужно от разработчика
 
-- **ОС:** Ubuntu 22.04 LTS или 24.04 LTS.
-- **Ресурсы:** минимум 2 CPU / 4 GB RAM / 40 GB SSD. Для 3+ сайтов на одном VPS — 4 CPU / 8 GB / 80 GB.
-- **Доступ:** root SSH по паролю от провайдера (переделаем на ключ ниже).
-- **IP:** статический, публичный.
+1. IP VPS, уже прогретого у провайдера (Timeweb, Hetzner, Reg.ru, любой Ubuntu 22.04/24.04).
+2. Один раз выполнить с Mac:
+   ```bash
+   ssh-copy-id root@{ip}
+   ```
+   Это кладёт публичный SSH-ключ разработчика в `/root/.ssh/authorized_keys`. Разово требует root-пароль (вводится в его терминале, не в чат).
+3. Сказать Claude: «сервер {ip}, запускай bootstrap».
 
-## 1. Первый вход и создание пользователя `deploy`
+Больше от разработчика ничего не нужно — дальше Claude.
 
-```bash
-ssh root@{server-ip}
-adduser deploy                 # задай пароль
-usermod -aG sudo deploy
-```
+## Что делает скрипт
 
-Прокинь свой ключ с Mac:
+| Шаг | Что |
+|-----|-----|
+| 1 | Создаёт пользователя `deploy` без пароля (`adduser --gecos "" --disabled-password`), добавляет в `sudo` group, копирует SSH-ключ из `/root/.ssh/authorized_keys`, прописывает `NOPASSWD:ALL` в `/etc/sudoers.d/deploy`. |
+| 2 | SSH hardening через drop-in `/etc/ssh/sshd_config.d/99-hardening.conf` (`PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`). Нейтрализует конфликтующий `50-cloud-init.conf` (на Timeweb/Hetzner там `PasswordAuthentication yes`) и комментирует `PermitRootLogin yes` в основном конфиге, если есть. `sshd -t` перед `systemctl reload ssh`. |
+| 3 | UFW: deny incoming / allow outgoing / allow 22, 80, 443. `ufw --force enable` (иначе интерактив). Устанавливает fail2ban (с `DEBIAN_FRONTEND=noninteractive`). |
+| 4 | Swap 2GB через `fallocate`, записывает в `/etc/fstab`. Критично на VPS с ≤4 GB RAM — билд Next.js иначе падает в OOM. |
+| 5 | Node.js 22 из NodeSource, nginx, git, certbot + python3-certbot-nginx, PM2 глобально. |
+| 6 | Папки `~/prod`, `~/dev` под deploy. Создаёт `~/ports.md` с шаблоном реестра (правило `prod = 3000 + N*10`, `dev = prod + 1000`). |
+| 7 | Генерит deploy-ключ `~/.ssh/deploy_key` (ed25519) для GitHub Actions, публичную половину дописывает в `~/.ssh/authorized_keys` самого же deploy (чтобы Actions мог ходить на себя), дедуп через `sort -u`. |
+| 8 | Удаляет дефолтный сайт nginx (`sites-enabled/default`), проверяет `nginx -t`, `systemctl enable --now nginx`. |
 
-```bash
-# На Mac (если ключа ещё нет):
-ssh-keygen -t ed25519 -C "{твой-email}"
-ssh-copy-id deploy@{server-ip}
-```
+**Чего скрипт НЕ делает:**
+- **Не включает `pm2-deploy` systemd-сервис.** Сервис `pm2 startup` требует непустого dump; если вызвать `systemctl enable --now pm2-deploy` без запущенных приложений — systemd видит, что pm2 сразу вышел, и помечает unit как `failed (Result: protocol)`. Включаем сервис в `server-add-site.md` после первого `pm2 save` с реальным процессом.
+- **Не настраивает SSL.** SSL выпускается per-site в `server-add-site.md` (certbot с уже поднятой HTTP-секцией).
+- **Не ставит пароль для `deploy`.** Пароль не нужен: sudo через NOPASSWD, логин по SSH-ключу. Если когда-нибудь понадобится консольный вход через панель провайдера — задать руками: `sudo passwd deploy`.
 
-Проверь вход: `ssh deploy@{server-ip}` — должно пустить без пароля.
-
-## 2. Безопасность SSH
-
-На сервере под `deploy`:
-
-```bash
-sudo nano /etc/ssh/sshd_config
-# PermitRootLogin no
-# PasswordAuthentication no
-sudo systemctl restart sshd
-```
-
-Проверь, что `ssh root@{server-ip}` теперь отказывает. **Не закрывай первый SSH-сеанс, пока не убедился, что второй работает.**
-
-## 3. Firewall и fail2ban
+## Как запустить
 
 ```bash
-sudo ufw allow 22 && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw enable
-sudo apt update && sudo apt install -y fail2ban
-sudo systemctl enable --now fail2ban
+# На Mac, откуда Claude подключается:
+scp /path/to/web-dev-bootstrap/scripts/bootstrap-vps.sh root@{ip}:/tmp/
+ssh root@{ip} 'bash /tmp/bootstrap-vps.sh'
 ```
 
-## 4. Swap (если RAM ≤ 4 GB — иначе билд Next.js упадёт с OOM)
+Или одной командой без scp:
+```bash
+ssh root@{ip} 'bash -s' < /path/to/scripts/bootstrap-vps.sh
+```
+
+Или через raw URL после merge ветки в `main`:
+```bash
+ssh root@{ip} 'curl -fsSL https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/main/scripts/bootstrap-vps.sh | bash'
+```
+
+Если нужно задать нестандартные значения:
+```bash
+ssh root@{ip} 'DEPLOY_USER=dev SWAP_SIZE=4G NODE_MAJOR=22 bash -s' < scripts/bootstrap-vps.sh
+```
+
+## Параметры скрипта
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEPLOY_USER` | `deploy` | Имя служебного пользователя. |
+| `DEPLOY_PUBKEY` | (пусто) | Публичный ключ для `authorized_keys` этого пользователя. Если не задан — берётся `/root/.ssh/authorized_keys`. Задавай, если хочешь явно зафиксировать ключ (например, запуская через cloud-init). |
+| `NODE_MAJOR` | `22` | Мажорная версия Node.js. |
+| `SWAP_SIZE` | `2G` | Размер swap-файла. `0` и меньше — не обрабатываются, используй `SKIP_SWAP=1`-патч если понадобится. |
+
+## Верификация после запуска
+
+Claude выполняет этот блок для проверки:
 
 ```bash
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+ssh deploy@{ip} 'bash -s' <<'EOF'
+echo "== OS =="; lsb_release -d
+echo "== User =="; id; sudo -n true && echo "sudo NOPASSWD: OK"
+echo "== SSH hardening =="; sudo sshd -T | grep -E '^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication)'
+echo "== Firewall =="; sudo ufw status verbose | head -10
+echo "== fail2ban =="; sudo systemctl is-active fail2ban
+echo "== Swap =="; swapon --show
+echo "== Stack =="; node -v; nginx -v 2>&1; pm2 --version; certbot --version 2>&1 | head -1
+echo "== Nginx =="; systemctl is-active nginx; ls /etc/nginx/sites-enabled/
+echo "== Folders =="; ls -ld ~/prod ~/dev; [ -f ~/ports.md ] && echo "ports.md OK"
+echo "== Deploy key (public, уже в authorized_keys) =="; cat ~/.ssh/deploy_key.pub
+EOF
 ```
 
-## 5. Стек
+Ожидаемое:
+- `permitrootlogin no`, `passwordauthentication no`, `pubkeyauthentication yes`.
+- `ufw` active, 22/80/443 allowed.
+- `fail2ban` active.
+- Swap `2G`.
+- Node `v22.x`, nginx `1.24+`, pm2 `6.x`, certbot `2.x`.
+- nginx active, `sites-enabled/` пусто.
+- `~/prod`, `~/dev`, `~/ports.md` на месте.
+- `~/.ssh/deploy_key.pub` выводится (эту строку положим в GitHub Secrets при первом сайте).
 
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
-sudo apt install -y nodejs nginx git certbot python3-certbot-nginx
-sudo npm install -g pm2
-pm2 startup                    # выполни выданную команду через sudo
-```
+## Частые проблемы (для Claude при запуске)
 
-Проверь: `node -v` (должно быть 22.x), `nginx -v`, `pm2 --version`.
-
-## 6. Папки
-
-```bash
-mkdir -p ~/prod ~/dev
-# Внутрь папок сайты будут укладываться при подключении — см. server-add-site.md.
-```
-
-## 7. Реестр портов
-
-```bash
-nano ~/ports.md
-```
-
-Вставь шаблон:
-
-```markdown
-# Ports registry on this VPS
-
-| Site       | prod port | dev port | PM2 names                   | Domain               |
-|------------|-----------|----------|-----------------------------|----------------------|
-| (пример)   | 3010      | 4010     | example-prod / example-dev  | example.com          |
-```
-
-Актуализируй этот файл каждый раз при добавлении сайта — чтобы не словить конфликт портов. Подробнее — `docs/server-multisite.md`.
-
-## 8. Deploy-ключ для GitHub Actions
-
-GitHub Actions будет ходить на VPS по SSH. Генерим отдельный ключ только под деплой:
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/deploy_key -N ""
-cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-cat ~/.ssh/deploy_key            # ⬅️ приватный ключ — скопируй целиком
-```
-
-Приватный ключ положишь в GitHub Secrets (`DEPLOY_SSH_KEY`) при подключении первого сайта (см. `server-add-site.md`). Публичный уже лежит в `authorized_keys`.
-
-## 9. Базовый nginx
-
-Проверь, что nginx запущен и отдаёт дефолтную страницу: `http://{server-ip}` в браузере → «Welcome to nginx».
-
-```bash
-sudo systemctl enable --now nginx
-sudo nginx -t                  # проверка конфига
-```
-
-Конфиги конкретных сайтов пойдут в `/etc/nginx/sites-available/`, подключаются симлинком в `sites-enabled/`. Удали дефолтный сайт после первой настройки, если мешает:
-
-```bash
-sudo rm /etc/nginx/sites-enabled/default
-```
-
-## 10. Проверка
-
-- [ ] `ssh deploy@{ip}` пускает без пароля, `ssh root@{ip}` — нет.
-- [ ] `ufw status` — active, открыты 22/80/443.
-- [ ] `sudo systemctl status fail2ban` — active.
-- [ ] `node -v` ≥ 22, `pm2 ls` — пусто, но команда работает.
-- [ ] `nginx -t` — syntax is ok.
-- [ ] `~/prod/` и `~/dev/` созданы, `~/ports.md` заведён.
-- [ ] Deploy-ключ создан, публичный добавлен в `authorized_keys`, приватный сохранён (положишь в GitHub Secrets при первом сайте).
-
-Готово. Теперь на этот VPS можно подключать любое количество сайтов через `docs/server-add-site.md`.
+| Симптом | Причина | Фикс |
+|---------|---------|------|
+| `ssh root@{ip}` отказывает после запуска скрипта | Скрипт отключил root-логин — это норма | Дальше работаем только `ssh deploy@{ip}` |
+| `sshd -T` после хардинга показывает `passwordauthentication yes` | Провайдер положил `/etc/ssh/sshd_config.d/50-cloud-init.conf` с `PasswordAuthentication yes` | Скрипт это обрабатывает (затирает файл). Если запустили вручную без скрипта — затереть самим и `systemctl reload ssh` |
+| `systemctl status pm2-deploy` — failed (protocol) | Известная проблема: pm2 startup + пустой dump | Это ожидаемо **до первого сайта**. Сервис включится после `pm2 save` в `server-add-site.md` |
+| `apt install` висит | Интерактивный prompt (debconf) | Все наши запуски уже под `DEBIAN_FRONTEND=noninteractive`. Если что-то проскочило — добавь `-o Dpkg::Options::="--force-confnew"` |
+| nginx 502 Bad Gateway | После bootstrap это норма — сайтов ещё нет | Решается в `server-add-site.md` |
 
 ## Обслуживание (раз в месяц)
 
 ```bash
-sudo apt update && sudo apt upgrade
-pm2 logs --nostream --lines 50         # полистай на ошибки
-df -h                                  # место на диске
-sudo certbot certificates              # сроки SSL
+ssh deploy@{ip} '
+  sudo apt update && sudo apt upgrade -y
+  pm2 logs --nostream --lines 50
+  df -h
+  sudo certbot certificates
+'
 ```
 
-## Типовые проблемы
+## Далее
 
-- **Nginx 502 на любом сайте** → PM2-процесс не стартанул: `pm2 logs {site}-prod --lines 100`.
-- **`pm2 ls` пусто после ребута** → забыл `pm2 startup` + `pm2 save`.
-- **Билд уронил сервер по OOM** → включи swap (п. 4).
-- **`conflicting server_name` при reload nginx** → бэкап-конфиг лежит внутри `sites-enabled/`. Перенеси в `~/nginx-backups/`.
+- `docs/domain-connect.md` — A-записи, `dig`, проверка перед SSL.
+- `docs/server-add-site.md` — подключить первый сайт на готовый VPS.
+- `docs/server-multisite.md` — когда и как уживаются несколько сайтов.

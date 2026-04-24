@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.1.1 — 2026-04-24 · Claude-driven server bootstrap
+
+Второй proход после живого тестирования на Ubuntu 24.04 Timeweb VPS. Обнаружили delta между чек-листом и реальностью, переписали под скрипт.
+
+- **Добавлен `scripts/bootstrap-vps.sh`** — идемпотентный скрипт, делает всё что раньше было чек-листом. Проверен на Timeweb VPS.
+- **Роль серверных доков инвертирована:** `server-manual-setup.md` теперь **для Claude**, не для человека. Разработчик один раз делает `ssh-copy-id root@{ip}`, дальше Claude рулит по SSH.
+- **CLAUDE.md:** снято правило «Never SSH into the VPS from Claude Code», заменено на «run batched idempotent scripts, not ad-hoc interactive edits».
+- **Deltas между v2.1 чек-листом и реальностью:**
+  - `adduser` интерактивный → `adduser --gecos "" --disabled-password`.
+  - `ufw enable` интерактивный → `ufw --force enable`.
+  - `apt` висит на конфиг-prompt'ах → `DEBIAN_FRONTEND=noninteractive`.
+  - На cloud-образах Ubuntu (Timeweb, Hetzner) `/etc/ssh/sshd_config.d/50-cloud-init.conf` перекрывает drop-in'ы — нужно затереть. Ещё и в главном `sshd_config` бывает `PermitRootLogin yes` на 42-й строке.
+  - `pm2 startup` + пустой dump → systemd валится с `failed (Result: protocol)`. Сервис включается только после первого `pm2 save` с реальным процессом (делается в `server-add-site.md`).
+- `scripts/README.md` — принципы написания серверных скриптов (idempotency, non-interactive, verify inline, secrets out of band).
+
 ## v2.1.0 — 2026-04-24 · Desktop-first workflow
 
 **Что это.** Переход с серверной разработки (Claude Code внутри VPS через SSH) на **локальную десктопную**: Claude Desktop на Mac → `git push` в GitHub → GitHub Actions катит на VPS. Сервер разработчик настраивает руками по чек-листам — Claude в эти операции не лезет.

@@ -2,7 +2,7 @@
 
 Универсальные модули KB. Читаются по требованию: открывай только то, что относится к текущей задаче (см. «KB files to read first» в каждой спеке). Никогда не загружай всё подряд — это съест контекст.
 
-> **Файлы «Для человека»** (`server-*.md`, `domain-connect.md`) — чек-листы, которые разработчик выполняет руками на VPS / у регистратора. Claude Code эти операции не выполняет, только ссылается на файлы в `specs/01b-server-handoff.md` и `specs/12-handoff.md`.
+> **Серверные операции выполняет Claude** через SSH на VPS. Разовая подготовка: разработчик один раз делает `ssh-copy-id root@{ip}`, дальше Claude подключается ключом. Источник истины для bootstrap — `scripts/bootstrap-vps.sh`, протестирован на Ubuntu 24.04 Timeweb.
 
 ## Карта файлов
 
@@ -19,10 +19,10 @@
 | `performance.md` | Core Web Vitals, изображения, шрифты, CSS, JS, кэш, nginx, **Methodology § 13** (lessons), бюджет, чек-лист | На performance-аудите; при подозрении на регрессию; при выборе либ |
 | `conversion-patterns.md` | 10 принципов конверсии: CTA, social proof, lead magnet, quiz, exit-intent, sticky, формы | На главной/посадочных; при доработке воронки |
 | `deploy.md` | Единая схема (Mac → GitHub → VPS), ветки, GitHub Actions, ежедневный цикл, откат, Cloudflare | При init проекта; при ежедневном деплое; при правках CI/CD |
-| `server-manual-setup.md` | **Для человека.** Разовая настройка свежего VPS: пользователь, SSH, ufw, swap, Node/nginx/PM2/certbot, deploy-ключ | Один раз на каждый новый VPS |
-| `server-add-site.md` | **Для человека.** Подключение нового сайта на готовый VPS: порты, клон, nginx, SSL, GitHub Secrets, первый деплой | Один раз на каждый новый сайт |
+| `server-manual-setup.md` | Разовая настройка свежего VPS через `scripts/bootstrap-vps.sh`: пользователь, SSH, ufw, swap, Node/nginx/PM2/certbot, deploy-ключ | Один раз на каждый новый VPS |
+| `server-add-site.md` | Подключение нового сайта на готовый VPS: порты, клон, nginx, SSL, GitHub Secrets, первый деплой | Один раз на каждый новый сайт |
 | `server-multisite.md` | Как уживаются несколько сайтов на одном VPS (реестр портов, PM2, nginx, когда выносить на отдельный VPS) | При подключении 2-го и далее сайта; при масштабировании |
-| `domain-connect.md` | **Для человека.** A-записи у регистратора или Cloudflare, проверка `dig`, подготовка к SSL | Один раз на каждый домен |
+| `domain-connect.md` | A-записи у регистратора или Cloudflare, проверка `dig`, подготовка к SSL | Один раз на каждый домен |
 
 ## Проектные файлы (не KB)
 
