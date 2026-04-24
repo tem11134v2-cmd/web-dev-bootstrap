@@ -11,18 +11,19 @@ type: reference
 
 ## Инфраструктура
 
+- **Локальная папка (Mac):** `~/projects/[project]/`
 - **VPS IP:** [xxx.xxx.xxx.xxx]
 - **SSH:** `ssh deploy@[ip]`
-- **Папка prod:** `~/prod/[project]/` (или `/var/www/[project]/` для схемы A)
-- **Папка dev:** `~/dev/[project]/` (только для схемы B)
-- **PM2 процесс prod:** `[project]-prod` (порт 3000)
-- **PM2 процесс dev:** `[project]-dev` (порт 4000) — только B
+- **Папка prod на VPS:** `~/prod/[project]/`
+- **Папка dev на VPS:** `~/dev/[project]/` (если настроен dev-preview)
+- **PM2 процесс prod:** `[project]-prod` (порт из `~/ports.md` — обычно 30X0)
+- **PM2 процесс dev:** `[project]-dev` (порт prod + 1000) — если есть preview
 - **Nginx config:** `/etc/nginx/sites-available/[project]`
 
 ## Домены
 
 - **Production:** `https://[domain]`
-- **Dev preview:** `https://dev.[domain]` (только B)
+- **Dev preview:** `https://dev.[domain]` (если настроен)
 - **DNS:** [Cloudflare / прямые A-записи / регистратор]
 - **SSL:** Let's Encrypt, auto-renew через certbot
 

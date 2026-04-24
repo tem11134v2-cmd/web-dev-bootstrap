@@ -16,9 +16,11 @@ Before coding:
 
 | № | Спека | Цель | Зависит от | Деплой после |
 |---|---|---|---|---|
-| 00 | `00-brief.md` | Принять материалы заказчика, разложить в `docs/spec.md`, `docs/content.md`, `docs/pages.md`, `docs/integrations.md` | — | нет |
-| 01 | `01-infrastructure.md` | VPS, безопасность, стек сервера, DNS, выбор схемы A/B, `.claude/hooks.json` + `/catchup` | 00 | сервер готов принять билд |
-| 02 | `02-project-init.md` | `create-next-app`, структура папок, базовые зависимости, скрипты, scaffold | 01 | первый билд (пустой) |
+| — | `00.5-new-project-init.md` | **Ритуал для разработчика** (не для Claude): создать `~/projects/{site}`, GitHub-репо, открыть Claude Desktop в папке, заполнить `CLAUDE.md`. Проходится **до** всего остального | — | нет |
+| 00 | `00-brief.md` | Принять материалы заказчика, разложить в `docs/spec.md`, `docs/content.md`, `docs/pages.md`, `docs/integrations.md` | 00.5 | нет |
+| 01a | `01a-local-setup.md` | Проверить тулчейн на Mac (node, npm, git, gh), git-идентичность, SSH к GitHub, `.nvmrc`, зафиксировать в memory | 00 | нет |
+| 01b | `01b-server-handoff.md` | Сгенерировать в репо: `.github/workflows/deploy-*.yml`, `deploy/nginx.conf.example`, `deploy/README.md` (чек-лист для человека). Пользователь сам поднимает VPS по `docs/server-manual-setup.md` + `docs/server-add-site.md` | 01a | сервер готов принять билд |
+| 02 | `02-project-init.md` | `create-next-app`, структура папок, базовые зависимости, скрипты, scaffold | 01a (01b параллельно — пока пользователь настраивает сервер) | первый билд (пустой) |
 | 03 | `03-design-system.md` | Цвета и шрифты из `docs/spec.md` в `globals.css`, базовый Header/Footer | 02 | дизайн-каркас на dev |
 | 04 | `04-homepage-and-approval.md` | Главная по `docs/content.md` + промежуточный деплой + одобрение заказчика | 03 | главная на dev/prod |
 | 05 | `05-subpages-template.md` | `ServicePageTemplate` + 1 пилотная страница услуги | 04 | первая услуга на dev |
@@ -34,10 +36,13 @@ Before coding:
 **Граф зависимостей (текстом):**
 
 ```
-00 → 01 → 02 → 03 → 04 → 05 → 06 ─┬─→ 08 ─→ 11 → 12 → 13 (loop)
-                                  ├─→ 09 ─→ 10 ─→ 11
-                                  └─→ 07 (опционально, после 02)
+00.5 (ты сам) → 00 → 01a ─┬─→ 02 → 03 → 04 → 05 → 06 ─┬─→ 08 ─→ 11 → 12 → 13 (loop)
+                          │                           ├─→ 09 ─→ 10 ─→ 11
+                          │                           └─→ 07 (опционально, после 02)
+                          └─→ 01b (параллельно 02–06, пока ты настраиваешь VPS)
 ```
+
+`01b` блокирует только **первый deploy** — Claude и пользователь могут делать 02–06 локально, пока VPS готовится. К моменту 04 (одобрение заказчика) сервер уже должен принимать push.
 
 ## Опциональные спеки (`specs/optional/`)
 

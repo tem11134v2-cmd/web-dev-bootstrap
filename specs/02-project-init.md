@@ -31,10 +31,9 @@
    ```bash
    npm install react-hook-form @hookform/resolvers zod next-mdx-remote gray-matter sharp lucide-react clsx tailwind-merge class-variance-authority tw-animate-css
    ```
-5. Настроить standalone output в `next.config.ts`:
+5. Настроить `next.config.ts` (без standalone — см. `docs/stack.md`):
    ```typescript
    const nextConfig = {
-     output: 'standalone',
      compress: false, // сжатие на nginx
      images: {
        formats: ['image/avif', 'image/webp'],
@@ -44,10 +43,10 @@
      reactStrictMode: true,
    }
    ```
-6. Настроить порты в `package.json` (по схеме из references.md):
+6. Настроить `package.json` scripts (dev на Mac и prod на VPS используют один порт 3000; на VPS фактический порт передаётся через переменную `PORT` при `pm2 start`):
    ```json
    "scripts": {
-     "dev": "next dev -p 4000 --turbopack",
+     "dev": "next dev -p 3000 --turbopack",
      "build": "next build",
      "start": "next start -p 3000",
      "lint": "next lint"
@@ -83,10 +82,10 @@
 
 ## Done when
 
-- `npm run dev` запускает сервер на порту 4000 без ошибок
+- `npm run dev` запускает сервер на порту 3000 без ошибок
 - Все папки структуры созданы
 - shadcn/ui компоненты установлены, Tailwind работает (проверка: `<Button>` рендерится со стилями)
-- `next.config.ts` содержит standalone output и оптимизацию изображений
+- `next.config.ts` содержит настройку изображений и `compress: false`
 - `CLAUDE.md` в корне проекта, секция `Project:` заполнена
 - Первый коммит создан
 

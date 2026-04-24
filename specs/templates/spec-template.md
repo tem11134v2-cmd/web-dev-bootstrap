@@ -74,17 +74,13 @@
 ## Deploy after completion
 
 <!--
-Опционально. Команды для выкатки изменений на dev/prod.
-Зависит от выбранной схемы деплоя (A: solo, B: client+CI). См. docs/deploy.md.
+Опционально. Команды для выкатки изменений. См. docs/deploy.md.
 -->
 
 ```bash
-# Схема A (dev=prod на одном VPS):
-npm run build && pm2 restart [project-name]
-
-# Схема B (через GitHub Actions):
 git push origin dev
-# PR dev → main → автодеплой
+# preview на dev.[domain] автоматически через GitHub Actions (если настроен)
+# → PR dev → main → merge → прод-деплой автоматически
 ```
 
 ## Done when

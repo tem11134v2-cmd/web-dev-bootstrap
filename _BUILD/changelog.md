@@ -1,5 +1,63 @@
 # Changelog
 
+## v2.1.2 — 2026-04-24 · Security hardening pass
+
+Добавили разумные дефолты поверх базового bootstrap. Применены и проверены на том же Timeweb VPS.
+
+- **Non-standard SSH port (default 2222).** Параметризуемо через `SSH_PORT`. Критичный нюанс Ubuntu 22.04+: надо `systemctl disable ssh.socket && systemctl enable ssh.service` — иначе socket activation игнорирует `Port` из `sshd_config`.
+- **fail2ban строже:** 3 попытки / 10 минут / бан 24 часа. `backend=systemd` (на Ubuntu 24.04 auth-логи идут в journald, не в `/var/log/auth.log`).
+- **unattended-upgrades.** Security patches применяются автоматически ежедневно, без auto-reboot. Ставит `apt-listchanges` для журнала изменений.
+- **Mac-side `~/.ssh/config`** с алиасом `vps1` — `ssh deploy@IP` работает без `-p 2222`. Инструкция в `docs/server-manual-setup.md`.
+
+## v2.1.1 — 2026-04-24 · Claude-driven server bootstrap
+
+Второй proход после живого тестирования на Ubuntu 24.04 Timeweb VPS. Обнаружили delta между чек-листом и реальностью, переписали под скрипт.
+
+- **Добавлен `scripts/bootstrap-vps.sh`** — идемпотентный скрипт, делает всё что раньше было чек-листом. Проверен на Timeweb VPS.
+- **Роль серверных доков инвертирована:** `server-manual-setup.md` теперь **для Claude**, не для человека. Разработчик один раз делает `ssh-copy-id root@{ip}`, дальше Claude рулит по SSH.
+- **CLAUDE.md:** снято правило «Never SSH into the VPS from Claude Code», заменено на «run batched idempotent scripts, not ad-hoc interactive edits».
+- **Deltas между v2.1 чек-листом и реальностью:**
+  - `adduser` интерактивный → `adduser --gecos "" --disabled-password`.
+  - `ufw enable` интерактивный → `ufw --force enable`.
+  - `apt` висит на конфиг-prompt'ах → `DEBIAN_FRONTEND=noninteractive`.
+  - На cloud-образах Ubuntu (Timeweb, Hetzner) `/etc/ssh/sshd_config.d/50-cloud-init.conf` перекрывает drop-in'ы — нужно затереть. Ещё и в главном `sshd_config` бывает `PermitRootLogin yes` на 42-й строке.
+  - `pm2 startup` + пустой dump → systemd валится с `failed (Result: protocol)`. Сервис включается только после первого `pm2 save` с реальным процессом (делается в `server-add-site.md`).
+- `scripts/README.md` — принципы написания серверных скриптов (idempotency, non-interactive, verify inline, secrets out of band).
+
+## v2.1.0 — 2026-04-24 · Desktop-first workflow
+
+**Что это.** Переход с серверной разработки (Claude Code внутри VPS через SSH) на **локальную десктопную**: Claude Desktop на Mac → `git push` в GitHub → GitHub Actions катит на VPS. Сервер разработчик настраивает руками по чек-листам — Claude в эти операции не лезет.
+
+**Почему.** Десктопная модель убирает риски автономного изменения сервера, сокращает цикл правки (локальный hot-reload быстрее SSH+билд), и лучше подходит к кейсу «один разработчик ведёт несколько проектов».
+
+### Ключевые изменения v2.0 → v2.1
+
+- **Убрали схемы деплоя A/B.** Осталась одна единая модель: Mac → GitHub → VPS.
+- **`docs/deploy-server-setup.md` удалён.** Разделён на четыре специализированных файла:
+  - `docs/server-manual-setup.md` — разовая настройка свежего VPS (**для человека**).
+  - `docs/server-add-site.md` — подключение нового сайта на готовый VPS (**для человека**).
+  - `docs/server-multisite.md` — как уживаются несколько сайтов.
+  - `docs/domain-connect.md` — A-записи и проверка `dig` (**для человека**).
+- **Файлы «для человека» (`server-*`, `domain-connect`) помечены в `docs/INDEX.md`.** Claude на них ссылается, но не исполняет.
+- **`specs/01-infrastructure.md` разделён на два:**
+  - `specs/01a-local-setup.md` — проверка тулчейна на Mac, git, SSH, память.
+  - `specs/01b-server-handoff.md` — Claude генерит в репо `.github/workflows/deploy-*.yml`, `deploy/nginx.conf.example`, `deploy/README.md`. Пользователь применяет на VPS сам.
+- **Добавлен `specs/00.5-new-project-init.md`** — ритуал разработчика при старте каждого нового сайта (создание папки, репо, открытие Claude Desktop).
+- **Убран `output: "standalone"` из стека.** Был лишним при PM2 + `next start`; подробности — в `docs/stack.md`.
+- **Скрипты `package.json`:** `dev` теперь на 3000 (совпадает с дефолтным prod-портом на VPS). На VPS порт задаётся через `PORT=...` при `pm2 start` по реестру `~/ports.md`.
+- **`CLAUDE.md`:** добавлено правило «Never push to main directly. Never SSH into the VPS from Claude Code».
+- **Обновлены:** `README.md`, `docs/INDEX.md`, `specs/INDEX.md`, `specs/02/04/09/11/12/13`, `specs/templates/spec-template.md`, `docs/workflow.md`, `docs/architecture.md`, `.claude/memory/pointers.md`, `.claude/memory/references.md`, `.claude/memory/project_state.md`.
+
+### Breaking changes v2.0 → v2.1
+
+1. **Нельзя работать в `main` напрямую.** Всегда через ветку `dev` + PR. Старые проекты с разработкой на `main` нужно перевести — настроить protected branch и переключить workflow.
+2. **Dev-сервер на Mac, не на VPS.** Если раньше запускали `npm run dev` по SSH — теперь локально. VPS только для prod (+ опционального dev-preview).
+3. **Нет больше схемы A.** Проекты «dev=prod на одном VPS, без GitHub» больше не поддерживаются как отдельная ветвь. Для одиночных проектов всё равно ставим GitHub — это цена консистентности и безопасности.
+4. **`next.config.ts` без standalone.** Если где-то в проекте закодирован `output: 'standalone'` — убрать. PM2 запускает `next start`, standalone лишний.
+5. **Спека 01 переименована.** Промпты «run spec 01-infrastructure» нужно заменить на «run spec 01a-local-setup» (или `01b-server-handoff`).
+
+---
+
 ## v2.0.0 — 2026-04-13 · Major restructure
 
 **Что это.** Полная переработка bootstrap-промпта. Раньше был один файл `web-dev-bootstrap.md` на 2128 строк — теперь папка с `docs/` (KB) + `specs/` (последовательность задач) + `CLAUDE.md` (вход) + `.claude/memory/` (проектная память).

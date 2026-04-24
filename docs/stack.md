@@ -6,7 +6,7 @@
 
 | Технология | Версия | Назначение |
 |---|---|---|
-| Next.js | 16+ | Фреймворк (App Router, Turbopack, standalone output) |
+| Next.js | 16+ | Фреймворк (App Router, Turbopack) |
 | React | 19+ | UI библиотека |
 | TypeScript | 5+ | Типизация |
 | Tailwind CSS | v4 | Стилизация (utility-first, CSS-first config) |
@@ -28,7 +28,9 @@
 
 ## Почему этот стек
 
-**Next.js 16 App Router.** Server Components по умолчанию (меньше клиентского JS), вложенные layouts, встроенная оптимизация (images, fonts, scripts), ISR/SSG из коробки, API routes для форм. Turbopack для быстрой dev-сборки. Standalone output для PM2-деплоя без `node_modules` на сервере.
+**Next.js 16 App Router.** Server Components по умолчанию (меньше клиентского JS), вложенные layouts, встроенная оптимизация (images, fonts, scripts), ISR/SSG из коробки, API routes для форм. Turbopack для быстрой dev-сборки.
+
+> **Почему без `output: "standalone"`.** Standalone собирает минимальный сервер в `.next/standalone/` для случаев, когда билд едет в Docker-образ или CI доставляет артефакт. У нас билд собирается прямо на VPS после `git pull`, PM2 запускает `next start` — standalone в этой схеме просто лишний артефакт. Если проект вырастет до Docker/отдельной build-ноды — включим тогда.
 
 **Tailwind v4.** Zero-config, быстрее v3, конфиг в CSS (`@theme`). Никакого custom CSS — только утилиты.
 
@@ -60,7 +62,7 @@ npm install \
 ```json
 {
   "scripts": {
-    "dev": "next dev -p 4000",
+    "dev": "next dev -p 3000",
     "build": "next build && npm run compress",
     "start": "next start -p 3000",
     "lint": "next lint",
@@ -69,5 +71,6 @@ npm install \
 }
 ```
 
-- `dev` на 4000, `start` на 3000 — чтобы dev и prod могли жить на одном VPS (см. `docs/deploy.md`, схема A).
+- `dev` на Mac по умолчанию на `localhost:3000` (совпадает с портом прода на VPS — так меньше путаницы при проверке URL-ов).
+- На VPS порт prod-процесса выбирается из реестра (`docs/server-multisite.md`) — обычно 3000/3010/3020 — и прописывается в PM2-команде `PORT=3010 pm2 start npm --name {site}-prod -- start`, а не в `package.json`. Скрипт `start` остаётся как fallback.
 - `compress` запускается после `build` — серверная оптимизация изображений в `public/` через sharp.

@@ -2,7 +2,7 @@
 
 ## KB files to read first
 - docs/performance.md
-- docs/deploy-server-setup.md (nginx config)
+- docs/server-add-site.md (nginx config)
 - /etc/nginx/sites-enabled/migrator
 - app/page.tsx (homepage sections)
 - components/service-page/ServicePageTemplate.tsx

@@ -4,17 +4,19 @@
 
 ## Stack
 
-Next.js 16 (App Router, Turbopack, standalone) + Tailwind v4 + shadcn/ui (base-ui) + TypeScript
+Next.js 16 (App Router, Turbopack) + Tailwind v4 + shadcn/ui (base-ui) + TypeScript
 Forms: React Hook Form + Zod → /api/lead → CRM (with `data/leads.json` fallback)
 Content: MDX (no database)
-Deploy: PM2 + Nginx + Let's Encrypt on VPS — see docs/deploy.md (schemes A/B)
+Dev: локально на Mac, `npm run dev` на `localhost:3000`
+Deploy: git push → GitHub Actions → PM2 + Nginx + Let's Encrypt на VPS (см. docs/deploy.md)
 
 ## Rules
 
 - IMPORTANT: Always use plan mode (Shift+Tab×2) before coding
 - Read relevant `docs/` files listed in spec's "KB files to read first" — never load all docs
 - Read `.claude/memory/INDEX.md` at session start, then load only relevant memory files
-- Work in `dev` branch (scheme B) or directly on main (scheme A) — see references.md
+- Work on `dev` branch, merge to `main` only via PR (`main` is protected)
+- Never push to `main` directly. SSH to the VPS is allowed for setup/maintenance (see docs/server-*.md) — use the developer's key at `~/.ssh/id_ed25519`; run batched idempotent scripts, not ad-hoc interactive edits
 - Commit after each completed sub-task with English messages
 - Max 150 lines per component — split if longer
 - ONLY use shadcn/ui components — never invent custom UI
@@ -44,12 +46,17 @@ docs/architecture.md       — folder structure, App Router, Server/Client split
 docs/design-system.md      — colors, typography, spacing, animation rules
 docs/content-layout.md     — 44 section types and their structure
 docs/forms-and-crm.md      — form handling, CRM integration, consultation dialog
-docs/deploy.md             — two deploy schemes (A/B), daily work, rollback
-docs/deploy-server-setup.md — VPS bootstrap, nginx, SSL, GitHub Actions, Cloudflare
+docs/deploy.md             — Mac → GitHub → VPS, branches, Actions, daily cycle, rollback
 docs/seo.md                — meta, Schema.org, redirects, Yandex specifics
 docs/performance.md        — Core Web Vitals, methodology (LCP breakdown), budget
 docs/conversion-patterns.md — CTA placement, social proof, lead magnets, quiz
 docs/legal-templates.md    — RU 152-ФЗ: cookie banner, PDn consent, privacy/terms
+
+# Серверные чек-листы (Claude исполняет через SSH):
+docs/server-manual-setup.md — разовая настройка свежего VPS (scripts/bootstrap-vps.sh)
+docs/server-add-site.md     — подключение сайта на готовый VPS
+docs/server-multisite.md    — как уживаются несколько сайтов
+docs/domain-connect.md      — A-записи, Cloudflare, dig-проверка
 ```
 
 ## Project-specific (filled per site, source for content)
@@ -63,8 +70,9 @@ docs/integrations.md  — CRM, analytics, domain, external services
 
 ## Specs
 
-Task specs in `specs/` folder, numbered 00→13. Execute one per session.
-- `specs/INDEX.md` — sequence, dependency graph, when to use optional specs
+Task specs in `specs/` folder. Execute one per session.
+- `specs/INDEX.md` — sequence (00.5 → 00 → 01a → 01b → 02 … → 13), dependency graph
+- `specs/00.5-new-project-init.md` — ритуал разработчика (делается до Claude)
 - `specs/optional/` — quiz, ecommerce, i18n, migrate-from-existing
 - `specs/templates/spec-template.md` and `page-spec-template.md` — copy when starting new specs
 - `specs/examples/` — mature spec examples from a real project (reference, not tasks)
@@ -72,9 +80,9 @@ Task specs in `specs/` folder, numbered 00→13. Execute one per session.
 ## Commands
 
 ```
-npm run dev      — dev server (port 4000)
-npm run build    — production build (standalone)
-npm run start    — prod server (port 3000)
+npm run dev      — dev server (port 3000, локально на Mac)
+npm run build    — production build (собирается на VPS после git pull)
+npm run start    — prod server (порт передаётся через PORT=... при pm2 start)
 npm run lint     — linting
 npm run compress — sharp image optimization
 ```
@@ -82,4 +90,4 @@ npm run compress — sharp image optimization
 ## Testing
 
 After each change: check on localhost, no console errors, responsive on 375/768/1280px.
-Before deploy: `npm run build` must succeed, Lighthouse mobile + desktop ≥ 90.
+Before merging to `main`: `npm run build` must succeed locally, Lighthouse mobile + desktop ≥ 90.
