@@ -18,6 +18,7 @@ DEPLOY_USER="${DEPLOY_USER:-deploy}"
 DEPLOY_PUBKEY="${DEPLOY_PUBKEY:-}"   # публичный ключ разработчика (Mac). Обязателен, иначе deploy не сможет залогиниться.
 NODE_MAJOR="${NODE_MAJOR:-22}"
 SWAP_SIZE="${SWAP_SIZE:-2G}"
+SSH_PORT="${SSH_PORT:-2222}"         # нестандартный SSH порт — режет фоновый брутфорс-шум. Не «безопасность», а noise reduction.
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Этот скрипт должен запускаться под root." >&2
@@ -59,8 +60,9 @@ visudo -c -f "/etc/sudoers.d/$DEPLOY_USER" >/dev/null
 # ─────────────────────────────────────────────
 # 2. SSH hardening (drop-in + нейтрализация cloud-init)
 # ─────────────────────────────────────────────
-log "[2/8] SSH hardening"
-cat > /etc/ssh/sshd_config.d/99-hardening.conf <<'CFG'
+log "[2/8] SSH hardening (port $SSH_PORT)"
+cat > /etc/ssh/sshd_config.d/99-hardening.conf <<CFG
+Port $SSH_PORT
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -76,25 +78,63 @@ fi
 # В основном конфиге тоже может быть `PermitRootLogin yes` — комментируем.
 sed -i 's/^PermitRootLogin yes/#PermitRootLogin yes  # overridden by 99-hardening.conf/' /etc/ssh/sshd_config || true
 
+# Ubuntu 22.04+ использует socket activation через ssh.socket. Пока он активен,
+# Port из sshd_config игнорируется (порт берётся из ssh.socket.d/addresses.conf).
+# Переключаем на прямой ssh.service, чтобы Port заработал.
 sshd -t
-systemctl reload ssh
+if systemctl is-active --quiet ssh.socket; then
+  systemctl disable --now ssh.socket
+fi
+systemctl enable --now ssh.service
+systemctl restart ssh.service
 
 # ─────────────────────────────────────────────
 # 3. Firewall + fail2ban
 # ─────────────────────────────────────────────
-log "[3/8] ufw + fail2ban"
+log "[3/8] ufw + fail2ban + unattended-upgrades"
 ufw --force reset >/dev/null
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
-ufw allow 22/tcp comment 'SSH' >/dev/null
+ufw allow "$SSH_PORT"/tcp comment 'SSH' >/dev/null
 ufw allow 80/tcp comment 'HTTP' >/dev/null
 ufw allow 443/tcp comment 'HTTPS' >/dev/null
 ufw --force enable >/dev/null
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq fail2ban
+apt-get install -y -qq fail2ban unattended-upgrades apt-listchanges
+
+# fail2ban: строже дефолта (3 попытки, бан 24 часа), следит за актуальным ssh портом.
+# sshd log на Ubuntu 24.04 — journald, не /var/log/auth.log; backend=systemd критичен.
+cat > /etc/fail2ban/jail.local <<CFG
+[DEFAULT]
+bantime  = 24h
+findtime = 10m
+maxretry = 3
+backend  = systemd
+
+[sshd]
+enabled = true
+port    = $SSH_PORT
+CFG
 systemctl enable --now fail2ban
+systemctl restart fail2ban
+
+# unattended-upgrades: ставит только security patches, без авто-reboot.
+cat > /etc/apt/apt.conf.d/50unattended-upgrades <<'CFG'
+Unattended-Upgrade::Allowed-Origins {
+    "\${distro_id}:\${distro_codename}-security";
+    "\${distro_id}ESMApps:\${distro_codename}-apps-security";
+    "\${distro_id}ESM:\${distro_codename}-infra-security";
+};
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+CFG
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CFG'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+CFG
+systemctl enable --now unattended-upgrades
 
 # ─────────────────────────────────────────────
 # 4. Swap
@@ -163,10 +203,12 @@ systemctl enable --now nginx
 # ─────────────────────────────────────────────
 log "Bootstrap complete."
 printf '\n\033[1;32m✓ Server ready.\033[0m\n'
+printf 'SSH:        ssh -p %s %s@<IP>\n' "$SSH_PORT" "$DEPLOY_USER"
 printf 'Deploy user: %s (sudo NOPASSWD, SSH key-only)\n' "$DEPLOY_USER"
-printf 'Stack: Node %s, nginx %s, PM2 %s, certbot %s\n' \
+printf 'Stack:       Node %s, nginx %s, PM2 %s, certbot %s\n' \
   "$(node -v)" "$(nginx -v 2>&1 | awk -F/ '{print $2}')" \
   "$(pm2 --version)" "$(certbot --version 2>&1 | awk '{print $2}')"
+printf 'Security:    ufw (%s/80/443), fail2ban (3 fails → 24h), unattended-upgrades (security only)\n' "$SSH_PORT"
 printf '\nGitHub Actions deploy key (public):\n'
 cat "/home/$DEPLOY_USER/.ssh/deploy_key.pub"
-printf '\nТеперь переходи к docs/server-add-site.md для подключения первого сайта.\n'
+printf '\nДальше: docs/server-add-site.md для подключения первого сайта.\n'

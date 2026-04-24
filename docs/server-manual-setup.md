@@ -21,8 +21,8 @@
 | Шаг | Что |
 |-----|-----|
 | 1 | Создаёт пользователя `deploy` без пароля (`adduser --gecos "" --disabled-password`), добавляет в `sudo` group, копирует SSH-ключ из `/root/.ssh/authorized_keys`, прописывает `NOPASSWD:ALL` в `/etc/sudoers.d/deploy`. |
-| 2 | SSH hardening через drop-in `/etc/ssh/sshd_config.d/99-hardening.conf` (`PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`). Нейтрализует конфликтующий `50-cloud-init.conf` (на Timeweb/Hetzner там `PasswordAuthentication yes`) и комментирует `PermitRootLogin yes` в основном конфиге, если есть. `sshd -t` перед `systemctl reload ssh`. |
-| 3 | UFW: deny incoming / allow outgoing / allow 22, 80, 443. `ufw --force enable` (иначе интерактив). Устанавливает fail2ban (с `DEBIAN_FRONTEND=noninteractive`). |
+| 2 | SSH hardening через drop-in `/etc/ssh/sshd_config.d/99-hardening.conf`: `Port 2222` (nonstandard — режет фоновый брутфорс), `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`. Нейтрализует конфликтующий `50-cloud-init.conf` (на Timeweb/Hetzner там `PasswordAuthentication yes`), комментирует `PermitRootLogin yes` в основном конфиге, переключает с `ssh.socket` на `ssh.service` (иначе Port из конфига игнорируется). `sshd -t` + `systemctl restart ssh.service`. |
+| 3 | UFW: deny incoming / allow outgoing / allow `SSH_PORT`, 80, 443. `ufw --force enable`. Устанавливает fail2ban (строгий jail.local: 3 попытки / 10 мин / 24 ч бан, `backend=systemd` для Ubuntu 24.04) и `unattended-upgrades` (security-only patches, без авто-reboot). |
 | 4 | Swap 2GB через `fallocate`, записывает в `/etc/fstab`. Критично на VPS с ≤4 GB RAM — билд Next.js иначе падает в OOM. |
 | 5 | Node.js 22 из NodeSource, nginx, git, certbot + python3-certbot-nginx, PM2 глобально. |
 | 6 | Папки `~/prod`, `~/dev` под deploy. Создаёт `~/ports.md` с шаблоном реестра (правило `prod = 3000 + N*10`, `dev = prod + 1000`). |
@@ -64,7 +64,23 @@ ssh root@{ip} 'DEPLOY_USER=dev SWAP_SIZE=4G NODE_MAJOR=22 bash -s' < scripts/boo
 | `DEPLOY_USER` | `deploy` | Имя служебного пользователя. |
 | `DEPLOY_PUBKEY` | (пусто) | Публичный ключ для `authorized_keys` этого пользователя. Если не задан — берётся `/root/.ssh/authorized_keys`. Задавай, если хочешь явно зафиксировать ключ (например, запуская через cloud-init). |
 | `NODE_MAJOR` | `22` | Мажорная версия Node.js. |
-| `SWAP_SIZE` | `2G` | Размер swap-файла. `0` и меньше — не обрабатываются, используй `SKIP_SWAP=1`-патч если понадобится. |
+| `SWAP_SIZE` | `2G` | Размер swap-файла. |
+| `SSH_PORT` | `2222` | На какой порт перевести SSH. Если не хочешь менять — `SSH_PORT=22`. |
+
+### Mac-сторона: `~/.ssh/config`
+
+После смены порта добавь в `~/.ssh/config` на Mac алиас, чтобы не писать `-p` каждый раз:
+
+```
+Host vps1 <IP>
+    HostName <IP>
+    User deploy
+    Port 2222
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+```
+
+Дальше `ssh vps1` или `ssh deploy@<IP>` работают одинаково без флагов.
 
 ## Верификация после запуска
 
@@ -101,6 +117,7 @@ EOF
 |---------|---------|------|
 | `ssh root@{ip}` отказывает после запуска скрипта | Скрипт отключил root-логин — это норма | Дальше работаем только `ssh deploy@{ip}` |
 | `sshd -T` после хардинга показывает `passwordauthentication yes` | Провайдер положил `/etc/ssh/sshd_config.d/50-cloud-init.conf` с `PasswordAuthentication yes` | Скрипт это обрабатывает (затирает файл). Если запустили вручную без скрипта — затереть самим и `systemctl reload ssh` |
+| SSH `Port 2222` задан в конфиге, но sshd слушает только 22 | Ubuntu 22.04+ использует socket activation (`ssh.socket`), который игнорирует `Port` в `sshd_config` и берёт порты из сгенерированного `ssh.socket.d/addresses.conf` | Скрипт делает `systemctl disable --now ssh.socket && systemctl enable --now ssh.service`. Дальше Port из конфига авторитативен |
 | `systemctl status pm2-deploy` — failed (protocol) | Известная проблема: pm2 startup + пустой dump | Это ожидаемо **до первого сайта**. Сервис включится после `pm2 save` в `server-add-site.md` |
 | `apt install` висит | Интерактивный prompt (debconf) | Все наши запуски уже под `DEBIAN_FRONTEND=noninteractive`. Если что-то проскочило — добавь `-o Dpkg::Options::="--force-confnew"` |
 | nginx 502 Bad Gateway | После bootstrap это норма — сайтов ещё нет | Решается в `server-add-site.md` |
