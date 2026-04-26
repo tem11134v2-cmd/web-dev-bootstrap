@@ -8,6 +8,31 @@
 
 ## 0. Первичная настройка Mac (один раз)
 
+### 0.0. Аккаунт на GitHub
+
+GitHub — где будет жить код всех твоих сайтов.
+
+- **Если аккаунта ещё нет** — заведи на github.com (бесплатный план подходит). Запомни логин и пароль.
+- **Если аккаунт уже есть** — посмотри свой логин в правом верхнем углу github.com (клик на аватарку → Your profile, в URL после `github.com/` будет твой логин).
+
+Дальше во всех командах:
+
+- `<твой-логин>` — твой GitHub-логин. Например: `tem11134v2`.
+- `<твой-email>` — твоя почта.
+- `{site}` — название конкретного сайта. Например: `migrator`, `clinic-landing`.
+
+**Как читать команды-шаблоны:**
+
+- Угловые `< >` и фигурные `{ }` скобки — плейсхолдеры от меня. Заменяешь их **целиком вместе со скобками** на свои данные.
+- Двойные кавычки `" "` — это синтаксис shell, оставляешь как есть.
+
+**Пример замены:**
+
+```
+git config --global user.name "<твой-логин>"   ← шаблон
+git config --global user.name "tem11134v2"     ← после замены
+```
+
 ### 0.1. Claude Code Desktop
 
 Зайди на claude.com → в меню сверху найди **Claude Code → Download for Mac**. Скачается .dmg файл. Открой → перетащи иконку Claude в папку Applications. Запусти — попросит войти через браузер (Google / Anthropic аккаунт).
@@ -45,20 +70,47 @@ brew install gh node
 
 Проверка: `gh --version && node --version && npm --version`
 
+Должно вывести что-то вроде:
+
+```
+gh version 2.x.x ...
+v22.x.x         ← важно: 22 или новее (Next.js 16 требует)
+10.x.x
+```
+
+Если `node --version` показывает меньше `v22` — `brew upgrade node`.
+
 ### 0.5. Git identity
 
+Имя и email, которыми будут подписываться твои коммиты.
+
 ```bash
+# Шаблон — замени плейсхолдеры на свои, кавычки оставь:
+git config --global user.name "<твой-логин>"
+git config --global user.email "<твой-email>"
+```
+
+```bash
+# Пример (мои данные):
 git config --global user.name "tem11134v2"
 git config --global user.email "tem11134v2@gmail.com"
 ```
 
+Проверка: `git config --get user.name && git config --get user.email` — должны вывестись твои значения.
+
 ### 0.6. SSH-ключ
 
 ```bash
-ssh-keygen -t ed25519 -C "твой-email@example.com"
+# Шаблон:
+ssh-keygen -t ed25519 -C "<твой-email>"
 ```
 
-Жми Enter три раза.
+```bash
+# Пример:
+ssh-keygen -t ed25519 -C "tem11134v2@gmail.com"
+```
+
+Жми Enter три раза (выбираем дефолтный путь и пустой passphrase).
 
 ### 0.7. Авторизация в GitHub через gh
 
@@ -68,7 +120,13 @@ gh auth login
 
 Диалог: GitHub.com → HTTPS → Y → Login with a web browser → код в браузер → Authorize.
 
-Проверка: `gh auth status`
+Проверка: `gh auth status` — должно вывести что-то вроде:
+
+```
+github.com
+  ✓ Logged in to github.com account <твой-логин> (keyring)
+  - Active account: true
+```
 
 ### 0.8. Создать папку ~/projects/
 
@@ -90,9 +148,30 @@ mkdir -p ~/projects
 
 ```bash
 cd ~/projects
-gh repo create tem11134v2-cmd/{site} --template tem11134v2-cmd/web-dev-bootstrap --private --clone
+gh repo create <твой-логин>/{site} --template tem11134v2-cmd/web-dev-bootstrap --private --clone
 cd {site}
 ```
+
+**В команде два разных GitHub-имени — не перепутай:**
+
+- `<твой-логин>` — куда **положить** новый репо. Это **ВАШ** аккаунт.
+- `tem11134v2-cmd/web-dev-bootstrap` — откуда **взять** шаблон. Это МОЙ публичный шаблон, оставляешь как есть.
+
+**Пример** (если ваш логин — `tem11134v2`, а сайт называется `migrator`):
+
+```bash
+cd ~/projects
+gh repo create tem11134v2/migrator --template tem11134v2-cmd/web-dev-bootstrap --private --clone
+cd migrator
+```
+
+**Что произойдёт:**
+
+- На GitHub появится новый приватный репозиторий `<твой-логин>/{site}`.
+- На Mac в `~/projects/{site}` склонируется свежая копия шаблона со всеми правилами и хуками внутри.
+- Терминал перейдёт в эту папку — ты готов к шагу 2.
+
+Если ругается `already exists` — репо с таким именем уже есть в твоём аккаунте, выбери другое имя.
 
 > Если переезжаешь с уже работающего сайта (Tilda, WordPress, …) — **не используй `--template`**. Создай пустой репо и читай `specs/optional/opt-migrate-from-existing.md` или `specs/14-migrate.md`.
 
@@ -100,6 +179,8 @@ cd {site}
 
 - Claude Desktop → **+ New chat** (Cmd+N).
 - **Select folder** → `~/projects/{site}`.
+
+При первом открытии папки macOS может спросить разрешение «Claude wants access to folder» — нажми **Allow** (разово, дальше не спрашивает).
 
 ## 3. Первое сообщение Claude
 
@@ -148,6 +229,8 @@ cd {site}
 ## 9. Сломал прод?
 
 Промпт Claude'у: «**откати прод на коммит `<hash>`**» — Claude прогонит `scripts/rollback.sh <hash>` (ssh + git reset + rebuild + pm2 restart) и подскажет команду для `git revert + push`, чтобы починка пошла через Actions поверх.
+
+`<hash>` — короткий идентификатор коммита, обычно 7 символов вроде `abc1234`. Видно в `git log` или в URL GitHub-коммита (последние 7 символов после `/commit/`).
 
 Если плохой коммит — это PR-merge (виден как «Merge pull request #N»), Claude подскажет `git revert -m 1 <hash>` (без `-m 1` git упадёт «commit has more than one parent»).
 
