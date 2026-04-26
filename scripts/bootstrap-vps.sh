@@ -140,6 +140,16 @@ systemctl enable --now unattended-upgrades
 # 4. Swap
 # ─────────────────────────────────────────────
 log "[4/8] Swap ($SWAP_SIZE)"
+# Pre-clean: если /swapfile уже есть, но не нужного размера — пересоздать.
+# Иначе ранее присутствующий 512M-файл (Timeweb default) останется как есть.
+if [ -f /swapfile ]; then
+  current_bytes=$(stat -c %s /swapfile 2>/dev/null || echo 0)
+  want_bytes=$(numfmt --from=iec "$SWAP_SIZE" 2>/dev/null || echo 0)
+  if [ "$current_bytes" -ne "$want_bytes" ] && [ "$want_bytes" -gt 0 ]; then
+    swapon --show | grep -q '^/swapfile' && swapoff /swapfile
+    rm -f /swapfile
+  fi
+fi
 if ! swapon --show | grep -q swapfile; then
   fallocate -l "$SWAP_SIZE" /swapfile
   chmod 600 /swapfile

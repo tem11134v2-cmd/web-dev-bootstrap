@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.2 — 2026-04-26 · Automation layer
+
+Сняли с человека всё, что Claude может делать сам: проверки перед сессией, переключение gh-аккаунтов, синхронизацию `.env` на VPS, откат прода, чистку старого swap до bootstrap. Теперь `HOW-TO-START` гораздо короче — длинных ручных ритуалов в нём почти не осталось.
+
+- **Хуки `.claude/hooks/`:**
+  - `session-start.sh` — `git fetch` + проверки в начале каждой сессии (отставание ветки, uncommitted, gh ↔ remote owner mismatch). Информирует, не блокирует.
+  - `before-push.sh` — блокирует Claude-side `git push` / `gh pr` / `gh repo` при несовпадении активного gh-аккаунта с владельцем remote-а (exit 2). Caveat: не ловит терминальный push пользователя — это страховка от ошибок Claude, не immutable защита.
+  - `format.sh` (prettier autoformat на изменённые файлы) и `guard-rm.sh` (блок `rm -rf /|~|*` и `git push --force`) — добавлены в шаблон (раньше были только проектным артефактом).
+- **Скрипты `scripts/`:**
+  - `sync-env.sh` — копирует `~/projects/{site}/.env.production` (gitignored) на VPS в `/home/deploy/prod/{site}/.env`, `chmod 600`, `pm2 restart --update-env`. Один канонический путь, без вопросов.
+  - `rollback.sh` — `ssh + git reset --hard <hash> + npm ci + build + pm2 restart` на проде. Подсказывает корректный `git revert` (включая `-m 1` для merge-коммитов — частая ловушка после PR-merge).
+  - `bootstrap-vps.sh` — pre-clean: пересоздаёт `/swapfile`, если его размер не совпадает с `SWAP_SIZE` (фикс для Timeweb default 512M).
+- **Документация:**
+  - `docs/automation.md` — описание четырёх хуков и двух скриптов: что делают, как локально отключить, как добавить новый.
+  - `docs/troubleshooting.md` — gh auth mismatch, DDoS-Guard 301 до cutover, deploy_key denied, branch protection 403 на private+free, swap не пересоздаётся, prod 404 после билда.
+  - `docs/team-onboarding.md` — для нового collaborator-а: clone, `npm install`, Claude Code, `feature → dev → main`. Чётко перечислено, что **не** дают (SSH, deploy_key, secrets).
+- **`CLAUDE.md` — секция «Automation rules»:** session-start, before-push, secrets, rollback. Шаблонные формулировки без проектных аліасов.
+- **`_BUILD/HOW-TO-START.md` + `.docx`:** переписаны. Сокращены §3 (доверяем session-start hook), `gh auth status` сжат в «Частые косяки». Добавлены §7 (collaborator), §8 (секреты), §9 (откат) — каждая по 1–2 строки промпта Claude'у. Entry-point для миграции живого сайта.
+- **Branch protection:** включена на `main` шаблона (он public — бесплатно). Require PR, no force push, no deletions.
+- **Тег `v2.2` после merge.**
+
 ## v2.1.3 — 2026-04-24 · Handoff and migration playbooks
 
 Закрыли белое пятно: что делать когда сайт передаётся заказчику или переезжает на другой VPS. Спеки `12-handoff` и новая `14-migrate` покрывают все сценарии, которые Timur использует на практике.
