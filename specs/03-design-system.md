@@ -14,26 +14,23 @@
 
 ### 1. Цвета и переменные
 
-1. В `app/globals.css` определить CSS-переменные из `docs/spec.md`:
+1. Конвертировать HEX из `docs/spec.md` в **OKLCH** (через oklch.com или аналог) — Tailwind v4 нативно работает в OKLCH, перцептивно ровные осветления/градиенты, поддержка P3-гамм. Подробнее почему OKLCH — `docs/design-system.md` § «OKLCH вместо HEX/HSL/RGB».
+2. В `app/globals.css` определить токены палитры через Tailwind v4 `@theme` (CSS-переменные внутри блока `@theme` автоматически становятся Tailwind utility-классами `bg-primary`, `text-accent` и т.д.):
    ```css
-   :root {
-     --primary: [HEX из брифа];
-     --accent: [HEX из брифа];
-     --text: #424242;
-     --background: #FFFFFF;
-     --section-bg: [HEX из брифа];
-     --border: #D6D6D6;
-   }
-   ```
-2. В `tailwind.config.ts` (или `app/globals.css` для Tailwind v4) — расширить палитру через `@theme`:
-   ```css
+   @import "tailwindcss";
+
    @theme {
-     --color-primary: var(--primary);
-     --color-accent: var(--accent);
-     /* ... */
+     /* HEX из брифа → OKLCH (см. комментарии для сверки с оригиналом) */
+     --color-primary: oklch(0.45 0.15 250);   /* #2D4A8A — фирменный синий */
+     --color-accent: oklch(0.65 0.20 30);     /* #E07A3F — оранжевый CTA */
+     --color-section-bg: oklch(0.97 0.005 250); /* #F4F6FA — светлый фон секции */
+     --color-text: oklch(0.30 0 0);           /* #424242 — основной текст */
+     --color-background: oklch(1 0 0);        /* #FFFFFF */
+     --color-border: oklch(0.85 0 0);         /* #D6D6D6 */
    }
    ```
-3. Проверить: класс `bg-primary` рендерится с правильным цветом
+   HEX в комментариях — это «source of truth от заказчика». При пересмотре палитры можно сверить.
+3. Проверить: класс `bg-primary` рендерится с правильным цветом, `bg-primary/90` (через `color-mix in oklch`) даёт видимо «тот же цвет чуть светлее», без сдвига оттенка
 
 ### 2. Типографика
 
