@@ -19,7 +19,7 @@ Before coding:
 | — | `00.5-new-project-init.md` | **Ритуал для разработчика** (не для Claude): создать `~/projects/{site}`, GitHub-репо, открыть Claude Desktop в папке, заполнить `CLAUDE.md`. Проходится **до** всего остального | — | нет |
 | 00 | `00-brief.md` | Принять материалы заказчика, разложить в `docs/spec.md`, `docs/content.md`, `docs/pages.md`, `docs/integrations.md` | 00.5 | нет |
 | 01a | `01a-local-setup.md` | Проверить тулчейн на Mac (node, pnpm, git, gh), git-идентичность, SSH к GitHub, `.tool-versions`, зафиксировать в memory | 00 | нет |
-| 01b | `01b-server-handoff.md` | Сгенерировать в репо: `.github/workflows/deploy-*.yml`, `deploy/nginx.conf.example`, `deploy/README.md` (чек-лист для человека). Пользователь сам поднимает VPS по `docs/server-manual-setup.md` + `docs/server-add-site.md` | 01a | сервер готов принять билд |
+| 01b | `01b-server-handoff.md` | Сгенерировать в репо: `.github/workflows/deploy-*.yml` (push-based по шаблону из `_BUILD/v3/templates/`), `deploy/{site}.caddy.example`, `deploy/README.md` (чек-лист для человека: SSH-ключ, GitHub Environment Secrets, mkdir releases/). Пользователь сам поднимает VPS по `docs/server-manual-setup.md` + `docs/server-add-site.md` | 01a | сервер готов принять билд |
 | 02 | `02-project-init.md` | `create-next-app`, структура папок, базовые зависимости, скрипты, scaffold | 01a (01b параллельно — пока пользователь настраивает сервер) | первый билд (пустой) |
 | 03 | `03-design-system.md` | Цвета и шрифты из `docs/spec.md` в `globals.css`, базовый Header/Footer | 02 | дизайн-каркас на dev |
 | 04 | `04-homepage-and-approval.md` | Главная по `docs/content.md` + промежуточный деплой + одобрение заказчика | 03 | главная на dev/prod |

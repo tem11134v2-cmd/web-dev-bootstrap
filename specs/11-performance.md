@@ -3,7 +3,7 @@
 ## KB files to read first
 
 - docs/performance.md (полностью — все разделы и Methodology § 13)
-- docs/server-add-site.md (nginx + Cache-Control, для справки — применяет на сервере человек)
+- docs/server-add-site.md (Caddy `encode` + Cache-Control, для справки — применяет на сервере человек)
 - `next.config.ts`
 - `app/page.tsx` + типовая страница услуги
 
@@ -91,20 +91,30 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 21. Если вся страница — server components без async — `loading.tsx` создаст пустой Suspense skeleton, который PSI воспримет как LCP. Удалить такие `loading.tsx`
 22. Оставить только там где есть реально async-данные
 
-### 9. Nginx-уровень
+### 9. Caddy-уровень
 
-23. Включить gzip_static (уже включён в стандартной конфигурации):
-    ```nginx
-    gzip_static on;
+23. Сжатие: `encode gzip zstd` уже в шаблоне `docs/server-add-site.md` § 4. Проверить, что в `/etc/caddy/Caddyfile.d/{site}.caddy` оно есть:
+    ```bash
+    ssh deploy@{ip} 'grep encode /etc/caddy/Caddyfile.d/{site}.caddy'
+    curl -I -H 'Accept-Encoding: zstd, gzip' https://{domain} | grep -i content-encoding
     ```
-24. Brotli — если `nginx -V 2>&1 | grep brotli` показывает поддержку, включить. Если нет — пропустить (gzip_static достаточно)
-25. Cache-Control: immutable на статику, revalidate на HTML — проверить (шаблон nginx в docs/server-add-site.md)
+24. Cache-Control: `@static` блок с `Cache-Control "public, max-age=31536000, immutable"` и `@html` с `must-revalidate` уже в шаблоне. Проверить отдачу:
+    ```bash
+    curl -I https://{domain}/_next/static/<file>.css   # immutable
+    curl -I https://{domain}/                          # must-revalidate
+    ```
+25. HTTP/2 + HTTP/3 + TLS 1.3 + OCSP stapling — Caddy включает дефолтом, делать ничего не надо. Проверить:
+    ```bash
+    curl -I --http3 https://{domain}                   # 200 → HTTP/3 работает
+    ```
+   Brotli в Caddy с коробки нет, но zstd обычно даёт сопоставимый или лучший результат — отдельно собирать `xcaddy` под brotli не требуется.
 
 ### 10. next.config — финальная проверка
 
-26. `compress: false` (сжатие на nginx)
-27. `images.formats: ['image/avif', 'image/webp']`
-28. `images.minimumCacheTTL: 60 * 60 * 24 * 365`
+26. `output: 'standalone'` (для push-based deploy, см. `docs/deploy.md`)
+27. `compress: false` (сжатие на Caddy через `encode gzip zstd`)
+28. `images.formats: ['image/avif', 'image/webp']`
+29. `images.minimumCacheTTL: 60 * 60 * 24 * 365`
 
 ### 11. Console и dev-артефакты
 
@@ -132,7 +142,7 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 ## Boundaries
 
 - **Always:** замер ДО и ПОСЛЕ (медиана из 3 замеров mobile, 1 desktop), коммит после каждой группы оптимизаций
-- **Ask first:** перед изменением nginx-конфига (бэкап обязателен), перед удалением функционала ради метрики
+- **Ask first:** перед изменением Caddy-конфига `/etc/caddy/Caddyfile.d/{site}.caddy` (бэкап обязателен — кладёшь его вне импортируемой папки, иначе `caddy validate` подхватит и выдаст конфликт; см. `docs/performance.md` § 13 Safety net), перед удалением функционала ради метрики
 - **Never:** жертвовать функциональностью ради цифр, оптимизировать без bundle analyzer (легко пилить не то), удалять console.log массово через find/replace без проверки
 
 ## Done when
@@ -141,7 +151,7 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 - Bundle analyzer чист (нет красных флагов)
 - Server Components везде где можно, dynamic imports для тяжёлого client
 - Изображения оптимизированы, шрифты локальны
-- nginx: gzip_static on, immutable cache
+- Caddy: `encode gzip zstd`, immutable cache на `_next/static/`, HTTP/3 включён
 - Нет console.log, нет лишних loading.tsx
 - WCAG AA контраст и иерархия заголовков
 
