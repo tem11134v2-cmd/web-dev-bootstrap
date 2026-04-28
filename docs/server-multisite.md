@@ -4,14 +4,14 @@
 
 ## Принцип
 
-**Один VPS — много сайтов — один nginx.** Каждый сайт:
+**Один VPS — много сайтов — один Caddy.** Каждый сайт:
 - свой порт (один prod, опционально один dev);
 - своя папка `~/prod/{site}/` (и `~/dev/{site}/` если нужен preview);
 - свой PM2-процесс `{site}-prod` (и `{site}-dev`);
-- своя секция в nginx (`/etc/nginx/sites-available/{site}`);
-- свой SSL-сертификат.
+- свой файл в `/etc/caddy/Caddyfile.d/{site}.caddy`;
+- свой SSL-сертификат (Caddy выписывает и обновляет сам).
 
-Общее: Node.js, nginx, PM2, certbot, ufw, fail2ban, swap.
+Общее: Node.js, Caddy, PM2, ufw, fail2ban, swap.
 
 ## Реестр портов (`~/ports.md` на VPS)
 
@@ -39,16 +39,16 @@ pm2 save                       # сохранить состояние для а
 
 **Имена процессов должны совпадать с `{site}`-префиксом**, иначе GitHub Actions `pm2 restart` не найдёт что перезапускать. Имя `{site}` фиксируется в `vars.SITE_NAME` в GitHub.
 
-## Nginx
+## Caddy
 
-Каждый сайт — отдельный файл в `/etc/nginx/sites-available/`. Подключается симлинком:
+Каждый сайт — отдельный файл в `/etc/caddy/Caddyfile.d/`. Подключение — просто положить файл (`/etc/caddy/Caddyfile` подключает их через `import /etc/caddy/Caddyfile.d/*.caddy`):
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/{site} /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
+sudo cp /home/deploy/prod/{site}/deploy/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
-Общий шаблон в `docs/server-add-site.md`. При правках — всегда `nginx -t` перед `reload`, иначе положишь все сайты разом.
+Общий шаблон в `docs/server-add-site.md`. При правках — всегда `caddy validate` перед `reload`, иначе положишь все сайты разом. `systemctl reload caddy` graceful: уже принятые соединения дорабатывают на старом конфиге.
 
 ## Что может пойти не так с несколькими сайтами
 
@@ -59,11 +59,11 @@ sudo nginx -t && sudo systemctl reload nginx
 
 2. **Долгий билд подвешивает другие сайты.** Если билд 30+ секунд и CPU 100% — другие сайты могут отдавать 502 пока не освободится. Это оправданная причина включить CDN/Cloudflare — он будет отдавать кэш при перегрузке origin.
 
-3. **Nginx-конфиг одного сайта ломает все.** `nginx -t` перед `reload` — обязателен. Если всё-таки сломал — `sudo systemctl status nginx` покажет, на какой строке какой файл.
+3. **Caddy-конфиг одного сайта ломает все.** `caddy validate` перед `reload` — обязателен. Если всё-таки сломал — `sudo systemctl status caddy --no-pager` и `journalctl -u caddy -n 50` покажут, на какой строке какой файл.
 
 4. **Один сайт доедает всё место на диске** (node_modules, логи PM2, старые билды). Проверяй `df -h` раз в месяц. `pm2 flush` чистит логи. При частых деплоях имеет смысл `pm2 install pm2-logrotate`.
 
-5. **SSL на десятках доменов.** Лимит Let's Encrypt — 50 сертификатов на домен в неделю. Для большинства случаев не проблема. Если проект действительно большой — смотри в сторону wildcard через DNS-challenge.
+5. **SSL на десятках доменов.** Лимит Let's Encrypt — 50 сертификатов на регистрируемый домен в неделю. Для большинства случаев не проблема. Caddy при превышении лимита автоматически фолбэчит на ZeroSSL (если в Caddyfile не зафиксирован конкретный issuer). Для крупного зоопарка субдоменов — смотри в сторону wildcard через DNS-challenge (требует DNS-провайдер, поддерживаемый Caddy plugin'ом).
 
 ## Когда пора выносить сайт на отдельный VPS
 
