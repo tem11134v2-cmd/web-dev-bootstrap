@@ -13,7 +13,7 @@ CLAUDE.md template — скопируй как `CLAUDE.md` в корень но�
 
 ## Stack
 
-<!-- Дефолт v3.0-next16. Замени если другой стек. -->
+<!-- Дефолт v3.0. Замени если другой стек. -->
 
 Next.js 16 (App Router, Turbopack) + Tailwind v4 + shadcn/ui (base-ui) + TypeScript
 Tooling: Biome (lint+format), pnpm (через corepack/mise), schema-dts для JSON-LD типов
@@ -35,6 +35,13 @@ Deploy: git push → GitHub Actions → PM2 + Caddy (встроенный ACME) 
 - Tailwind only — no custom CSS, no CSS modules, no styled-components
 - Mobile-first responsive design
 - Server Components by default; `"use client"` only for state/effects/handlers
+
+## Automation rules (hooks + scripts)
+
+- **Session start:** `git fetch origin`, check if branch is behind upstream, offer `git pull`. After pull — re-read `.claude/memory/INDEX.md`. Hook `.claude/hooks/session-start.sh` does this automatically at the start of every session.
+- **Before any `git push` / `gh repo` / `gh pr` command:** verify `gh auth status` active account matches the repo owner from `git remote get-url origin`. On mismatch: `gh auth switch -h github.com -u <owner>`. Hook `.claude/hooks/before-push.sh` blocks Claude-side pushes on mismatch (exit 2). Caveat: catches only Claude-side commands, not terminal pushes.
+- **Secrets:** `.env*` (except `.env.example`) — never commit. Production secrets live in GitHub Environment `production` (single multiline secret `PROD_ENV_FILE` = full `.env.production`); the deploy workflow writes them into `releases/<sha>/.env` on every push. Update via `gh secret set --env production PROD_ENV_FILE < ~/projects/{site}/.env.production`. Fallback when Actions are down: `scripts/sync-env.sh` patches `current/.env` directly.
+- **Rollback prod:** `scripts/rollback.sh` — atomic switch of `~/prod/{site}/current` symlink back to the previous release in `releases/<previous-sha>/` + `pm2 reload`. Milliseconds, no rebuild. Then on Mac: `git revert <bad-commit> && git push origin main` — Actions builds and rsyncs a fresh release. For merge commits use `git revert -m 1 <hash>`.
 
 ## Memory triggers (when to update .claude/memory/)
 
@@ -87,7 +94,7 @@ Task specs in `specs/` folder. Execute one per session.
 - `specs/00.5-new-project-init.md` — ритуал разработчика (делается до Claude)
 - `specs/optional/` — quiz, ecommerce, i18n, migrate-from-existing
 - `specs/templates/spec-template.md` and `page-spec-template.md` — copy when starting new specs
-- `specs/examples/` — mature spec examples (reference, not tasks)
+- `specs/examples/` — mature spec examples from a real project (reference, not tasks)
 
 ## Commands
 
