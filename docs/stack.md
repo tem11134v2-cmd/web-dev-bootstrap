@@ -26,6 +26,7 @@
 - `class-variance-authority` (CVA) — варианты компонентов
 - `tw-animate-css` — CSS-анимации для Tailwind v4
 - `gray-matter` — парсинг frontmatter в MDX
+- `@marsidev/react-turnstile` — клиент Cloudflare Turnstile (антиспам форм). Серверная часть — fetch на `challenges.cloudflare.com/turnstile/v0/siteverify` без сторонних либ. Подробности — `docs/forms-and-crm.md` § «Антиспам — Cloudflare Turnstile».
 - `schema-dts` (devDep) — типы Schema.org от Google. Используется в `lib/schema.ts` для типобезопасных JSON-LD генераторов: `WithContext<Service>`, `WithContext<Article>`, `WithContext<BreadcrumbList>`. Опечатка в `@type` или поле — TypeScript-ошибка на билде, а не «странный warning в Yandex Validator уже на проде».
 
 ## Почему этот стек
@@ -49,7 +50,7 @@ npx create-next-app@latest project-name --typescript --tailwind --app --turbopac
 cd project-name
 npx shadcn@latest init
 pnpm add \
-  react-hook-form @hookform/resolvers zod \
+  react-hook-form @hookform/resolvers zod @marsidev/react-turnstile \
   sonner lucide-react \
   next-mdx-remote gray-matter \
   sharp clsx tailwind-merge class-variance-authority tw-animate-css
