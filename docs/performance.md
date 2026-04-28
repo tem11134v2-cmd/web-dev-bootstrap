@@ -97,6 +97,40 @@ location ~* \.html$ {
 
 ISR в Next.js = серверный кэш с автоматической ревалидацией. Redis для тяжёлых API/БД.
 
+### Next.js: директива `use cache`
+
+В Next.js 16 серверные функции и компоненты можно отметить `'use cache'` — Next автоматически кэширует результат на основании входных параметров. Это **штатная замена** прежним `unstable_cache` / `fetch.cache: 'force-cache'` / `cache()` — синтаксически проще, видно из IDE, работает и для React Server Components, и для обычных server-функций.
+
+```typescript
+// Тяжёлый расчёт, который можно посчитать один раз и держать в кэше
+async function getServicesPricing(region: string) {
+  'use cache'
+  const all = await db.pricing.findMany({ where: { region } })
+  return all.map(transformForUI)
+}
+
+// Серверный компонент целиком
+export async function HeavyServerSection({ slug }: { slug: string }) {
+  'use cache'
+  const data = await loadFromMDX(slug)
+  return <Section data={data} />
+}
+```
+
+Когда применять:
+- **Тяжёлые server-компоненты** с дорогим парсингом контента (MDX без Content Collections, расчёты на основе константных данных). Content Collections и так build-time, поэтому `use cache` поверх `allPosts` обычно избыточен — но если у блога есть filter-by-tag с тяжёлым transform, имеет смысл обернуть.
+- **Серверные fetch-вызовы к редко-меняющимся API** (курсы валют, статус праздничных дней, контент CMS). Дешевле, чем guard `Promise.all` + ручной `unstable_cache`.
+- **Расчёты с детерминированным выходом** — рендер большой таблицы цен на основании `region`, `currency`, `tier`. На каждый уникальный набор аргументов — одна отработка, дальше из кэша.
+
+Когда **не** применять:
+- Динамика, привязанная к запросу пользователя (личный кабинет, корзина, авторизация). Кэш будет шарить ответ между пользователями — security-баг.
+- Компоненты, которые читают `cookies()` / `headers()` / `searchParams`. Next ругнётся на билде, потому что кэшируемая функция не должна зависеть от per-request state.
+- Когда `revalidatePath` / `revalidateTag` дешевле и точнее. `use cache` лучше для «посчитать один раз», `revalidate*` — для «перепосчитать после мутации».
+
+`cacheTag()` и `cacheLife()` дают точечный контроль (TTL, инвалидация по тегу). По умолчанию TTL — 15 минут, можно поднять до часа/дня для редко-меняющегося контента.
+
+> **Важно про конфиг.** В Next.js 16 директива `use cache` требует включения через `experimental.useCache: true` в `next.config.ts` (на момент 16.0). Уточняй актуальный статус в [docs](https://nextjs.org/docs/app/api-reference/directives/use-cache) — фича выходит из experimental постепенно.
+
 ## 8. Серверная оптимизация (nginx)
 
 ```nginx
