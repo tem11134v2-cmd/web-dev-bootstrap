@@ -2,9 +2,10 @@
 
 ## KB files to read first
 
-- docs/deploy.md (раздел «Собственность», «Откат прода»)
-- docs/server-manual-setup.md (что на сервере, что значат роли `deploy`, deploy_key)
+- docs/deploy.md (push-based flow, структура `releases/<sha>/`)
+- docs/server-manual-setup.md (что на сервере, роль `deploy`)
 - docs/server-add-site.md (раздел «Частые проблемы»)
+- docs/automation.md (rollback.sh, sync-env.sh fallback)
 - `.claude/memory/references.md` (всё что заказчик должен получить)
 - `.claude/memory/decisions.md` (что заказчик должен знать о решениях)
 - Если handoff совмещён с переездом на инфру заказчика — `specs/14-migrate.md` (сценарий M2).
@@ -102,39 +103,41 @@ sudo systemctl restart caddy   # только если status показывае
 
 ### Обновления из GitHub не приехали
 
-1. GitHub → репо → Actions → посмотреть последний запуск `deploy-prod.yml`.
-2. Если упал — «Re-run failed jobs».
+1. GitHub → репо → Actions → последний запуск `deploy-prod.yml`.
+2. Если упал — посмотреть лог job-а (build / deploy / activate). Чаще всего: SSH-ключ устарел, `PROD_ENV_FILE` секрет потёрся, на VPS закончилось место (`df -h`).
 3. Если не запустился — убедиться, что merge в `main` прошёл, ветка `main` не заморожена.
-4. Ручной pull (как fallback):
+4. После исправления — «Re-run failed jobs» или пустой коммит:
+   ```bash
+   git commit --allow-empty -m "chore: trigger deploy" && git push origin main
+   ```
 
-   ssh deploy@{ip}
-   cd ~/prod/{site}
-   git pull origin main && pnpm install --frozen-lockfile && pnpm build && pm2 restart {site}-prod
+Под push-based deploy на VPS **нет git и нет pnpm** — ручной `git pull && pnpm build` не сработает. Если совсем плохо и Actions недоступны: попроси разработчика собрать standalone-сборку локально и `rsync` руками в `~/prod/{site}/releases/<sha>/`, затем `ln -sfn` + `pm2 reload`.
 
 ### Билд падает с OOM (out of memory)
 
-ssh deploy@{ip}
-free -h                               # swap должен быть 2G
-# если нет — включить swap вручную (см. docs/server-manual-setup.md § 4)
+Билд идёт на GitHub-runner-е (стандартные 7 ГБ RAM) — на VPS OOM произойти не может. Если в логе runner-а видно OOM — обычно это слишком тяжёлый бандл; cпрашивай разработчика, не VPS-проблема.
 
 ### Откат на последнюю рабочую версию
 
-ssh deploy@{ip}
-cd ~/prod/{site}
-git log --oneline -10                 # найти последний рабочий коммит
-git reset --hard {commit-hash}
-pnpm install --frozen-lockfile && pnpm build && pm2 restart {site}-prod
+С Mac разработчика:
+   ```bash
+   cd ~/projects/{site}
+   scripts/rollback.sh
+   ```
+Скрипт переключит симлинк `~/prod/{site}/current` на предыдущий релиз и сделает `pm2 reload`. Атомарно, миллисекунды, без пересборки.
+
+После — в Mac разработчик делает `git revert <bad-commit> && git push origin main` (для merge-коммита: `git revert -m 1 <hash>`), и Actions соберёт чистый релиз поверх.
 
 ### Лиды не доходят в CRM
 
-1. На VPS: `tail ~/prod/{site}/data/leads.json` — есть ли свежие записи?
-2. Если есть в файле, но нет в CRM — токен/webhook сломались. Обновить `.env` → `pm2 restart`.
+1. На VPS: `tail ~/prod/{site}/current/data/leads.json` — есть ли свежие записи? (путь идёт через симлинк в активный релиз)
+2. Если есть в файле, но нет в CRM — токен/webhook сломались. Обновить `PROD_ENV_FILE` через `gh secret set` и пушнуть пустой коммит, либо как fallback — `scripts/sync-env.sh`.
 3. Если в файле пусто — Server Action `submitLead` сам не отрабатывает. Проверить `pm2 logs {site}-prod` на ошибки.
 
 ### Сайт работает медленно
 
 1. PSI: pagespeed.web.dev → ввести URL → Mobile + Desktop.
-2. Если упало после релиза — `git log` + откат (см. выше).
+2. Если упало после релиза — `scripts/rollback.sh` (см. выше).
 3. Если без изменений — VPS перегружен: `htop`, `df -h`, возможно пора на более мощный VPS (см. `specs/14-migrate.md`, сценарий M1).
 ```
 
