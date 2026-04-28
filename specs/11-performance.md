@@ -37,9 +37,9 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 ### 2. Bundle: убрать раздутые зависимости
 
 4. По красным флагам из docs/performance.md:
-   - Если есть `zod` v4 — заменить на `valibot` (1-3 KB вместо ~100 KB)
    - Если есть `moment` — заменить на `date-fns` или `dayjs`
    - Если есть полный `lodash` — `lodash-es` с именованными импортами
+   - Если есть `react-icons` целиком — заменить на нужный сабсет (`react-icons/lu` и т.п.)
 5. Проверить bundle ещё раз — что снизилось
 
 ### 3. Server Components (если ещё не везде)
