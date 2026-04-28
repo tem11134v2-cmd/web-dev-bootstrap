@@ -5,24 +5,24 @@
 ## Архитектура
 
 ```
-[React Hook Form + Zod + <Turnstile />]
-        │  POST /api/lead { name, phone, email?, message?, consent: true, turnstileToken }
+[React Hook Form + Zod + <Turnstile /> + useActionState]
+        │  formAction(formData) → вызов Server Action напрямую
         ▼
-[/api/lead/route.ts]
-   ├─ Zod validate (server-side, дублирует клиент)
+[Server Action: app/actions/submit-lead.ts ('use server')]
    ├─ Rate limit (1 req / 10s / IP)
+   ├─ Zod validate (FormData → object → schema.safeParse)
    ├─ Turnstile verify (challenges.cloudflare.com/turnstile/v0/siteverify)
-   │      └─ fail → 400 { error: "Captcha failed" }
+   │      └─ fail → return { error: "Защита от спама не пройдена" }
    ├─ POST в CRM (try)
-   │      └─ ok → 200 { success: true }
+   │      └─ ok → return { success: true }
    └─ catch / CRM down
-          └─ append data/leads.json → 200 { success: true, fallback: true }
+          └─ append data/leads.json → return { success: true, fallback: true }
 ```
 
 Принципы:
-- **Один endpoint** на все формы (`/api/lead`) — поле `source` различает откуда пришло.
+- **Server Action вместо Route Handler** — формы вызывают `submitLead` напрямую через `useActionState`/`<form action={...}>`. Endpoint `/api/lead` больше не нужен и **не создаётся**. Поле `source` в FormData различает откуда пришло.
 - **Fallback в JSON** — если CRM упала, лиды не теряются. Файл `data/leads.json` в `.gitignore`.
-- **Никаких ключей CRM в клиентском коде** — только в `process.env.*` на сервере.
+- **Никаких ключей CRM в клиентском коде** — только в `process.env.*` внутри Server Action.
 - **Антиспам через Cloudflare Turnstile** — токен с клиента проверяется на сервере **до** обращения к CRM (см. ниже). Без валидного токена лид не уходит ни в CRM, ни в fallback.
 
 ## Клиентская часть
@@ -30,12 +30,13 @@
 ```typescript
 // components/forms/ContactForm.tsx
 "use client";
-import { useRef, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
+import { submitLead, type LeadState } from "@/app/actions/submit-lead";
 
 const schema = z.object({
   name: z.string().min(2, "Минимум 2 символа"),
@@ -47,44 +48,56 @@ const schema = z.object({
 
 const turnstileRef = useRef<TurnstileInstance | null>(null);
 const [token, setToken] = useState<string>("");
+const [state, formAction, isPending] = useActionState<LeadState, FormData>(submitLead, null);
 
-const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
+const { register, formState: { errors } } = useForm({
   resolver: zodResolver(schema),
   mode: "onBlur",
 });
 
-const onSubmit = async (data) => {
-  if (!token) {
-    toast.error("Подтвердите, что вы не робот.");
-    return;
-  }
-  const res = await fetch("/api/lead", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...data, source: "contact-form", turnstileToken: token }),
-  });
-  if (res.ok) toast.success("Заявка отправлена!");
-  else toast.error("Ошибка отправки. Попробуйте ещё раз.");
-  turnstileRef.current?.reset(); // одноразовый токен — переполучаем для следующего submit
+// Реакция на результат Server Action
+useEffect(() => {
+  if (!state) return;
+  if (state.success) toast.success("Заявка отправлена!");
+  else if (state.error) toast.error(state.error);
+  // одноразовый токен — переполучаем для следующего submit
+  turnstileRef.current?.reset();
   setToken("");
-};
+}, [state]);
 
-// Внутри JSX, рядом с submit:
-<Turnstile
-  ref={turnstileRef}
-  siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
-  onSuccess={setToken}
-  options={{ theme: "light", size: "flexible" }}
-/>;
+// JSX:
+<form action={formAction}>
+  <input {...register("name")} name="name" />
+  <input {...register("phone")} name="phone" />
+  {/* ...остальные поля */}
+  <input type="hidden" name="source" value="contact-form" />
+  <input type="hidden" name="turnstileToken" value={token} />
+  <Turnstile
+    ref={turnstileRef}
+    siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
+    onSuccess={setToken}
+    options={{ theme: "light", size: "flexible" }}
+  />
+  <button type="submit" disabled={isPending || !token}>
+    {isPending ? "Отправляем..." : "Отправить"}
+  </button>
+</form>;
 ```
 
-Чекбокс согласия на ПДн — обязателен (см. `docs/legal-templates.md`). Без него форма не отправляется.
+Ключевые моменты:
+- `useActionState(submitLead, null)` возвращает `[state, formAction, isPending]`. `formAction` подставляется в `<form action={formAction}>` — без `fetch`, без ручного `e.preventDefault()`.
+- `isPending` идёт прямо на `disabled` кнопки — Next сам управляет состоянием pending без `useState`.
+- Turnstile-токен и `source` идут в FormData как hidden-инпуты — Server Action читает их через `formData.get()`.
+- Если `!token` — кнопка `disabled`, на сервер не идём (страховка от submit без капчи).
 
-## API Route
+Чекбокс согласия на ПДн — обязателен (см. `docs/legal-templates.md`). Без него форма не отправляется (Zod-валидация на сервере отклонит).
+
+## Server Action
 
 ```typescript
-// app/api/lead/route.ts
-import { NextRequest, NextResponse } from "next/server";
+// app/actions/submit-lead.ts
+"use server";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { sendToCRM } from "@/lib/crm";
 import { appendFallback } from "@/lib/fallback";
@@ -100,19 +113,22 @@ const schema = z.object({
   turnstileToken: z.string().min(1),
 });
 
-export async function POST(req: NextRequest) {
-  const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+export type LeadState = { success: true } | { error: string } | null;
+
+export async function submitLead(_prev: LeadState, formData: FormData): Promise<LeadState> {
+  const ip = (await headers()).get("x-forwarded-for") ?? "unknown";
   if (!rateLimit(ip, 1, 10_000)) {
-    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    return { error: "Слишком много запросов. Подождите минуту." };
   }
 
-  const body = await req.json();
-  const parsed = schema.safeParse(body);
+  // FormData → объект. Чекбокс consent приходит как "on" — приводим к boolean.
+  const raw = Object.fromEntries(formData);
+  const parsed = schema.safeParse({ ...raw, consent: raw.consent === "on" || raw.consent === "true" });
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+    return { error: "Проверьте поля формы" };
   }
 
-  // Turnstile verify ДО CRM, иначе бот успеет создать лид если CRM ляжет в fallback
+  // Turnstile verify ДО CRM, иначе бот успеет создать лид если CRM ляжет в fallback.
   const verify = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -124,7 +140,7 @@ export async function POST(req: NextRequest) {
   });
   const result = (await verify.json()) as { success: boolean; "error-codes"?: string[] };
   if (!result.success) {
-    return NextResponse.json({ error: "Captcha failed" }, { status: 400 });
+    return { error: "Защита от спама не пройдена" };
   }
 
   try {
@@ -133,9 +149,15 @@ export async function POST(req: NextRequest) {
     console.error("CRM error", err);
     await appendFallback(parsed.data);
   }
-  return NextResponse.json({ success: true });
+  return { success: true };
 }
 ```
+
+Почему Server Action, а не Route Handler:
+- **Меньше кода** — нет `NextRequest`/`NextResponse`, нет ручного парсинга JSON. FormData → schema напрямую.
+- **Тип возвращаемого значения** виден на клиенте через `useActionState<LeadState, FormData>` — IDE подсказывает структуру `state`.
+- **Прогрессивное улучшение из коробки** — `<form action={...}>` работает даже при выключенном JS (Next отправит multipart/form-data, Server Action отработает на сервере). Для лид-форм это страховка для пользователей с агрессивными расширениями/блокировщиками.
+- **Один меньше endpoint** — нет публичного `/api/lead`, который надо защищать от прямых POST-запросов с Postman. Server Action доступен только из Next-приложения через `next-action` header (Next добавляет CSRF-токен автоматически).
 
 ## CRM-интеграции (готовые шаблоны)
 
@@ -242,7 +264,7 @@ pnpm add @marsidev/react-turnstile
 
 ### Сервер — verify ДО CRM
 
-Серверная проверка делается **до** отправки в CRM (см. полный код в разделе «API Route» выше). Почему до:
+Серверная проверка делается **до** отправки в CRM (см. полный код в разделе «Server Action» выше). Почему до:
 1. Если CRM лежит и срабатывает fallback в `data/leads.json` — без verify бот успеет насыпать туда мусора.
 2. Семантика 400 «captcha failed» отличается от 500 «CRM down» — клиент покажет правильный toast.
 
@@ -263,6 +285,30 @@ pnpm add @marsidev/react-turnstile
 - Site key `1x00000000000000000000AA` всегда проходит на клиенте.
 - Secret key `1x0000000000000000000000000000000AA` всегда возвращает `success: true` на сервере.
 - Полезно в `.env.local` пока не получили боевые ключи или в e2e-тестах.
+
+## `useOptimistic` для UX-без-задержки (опционально)
+
+Для **многошаговых сценариев** (квиз, мастер-настройки, чат поддержки) — пока Server Action летит, можно сразу показать предположительный итог через `useOptimistic`, а потом откатить если ошибка.
+
+```typescript
+"use client";
+import { useOptimistic } from "react";
+
+const [optimisticAnswers, addOptimistic] = useOptimistic(
+  answers,
+  (state, newAnswer: { stepId: string; value: string }) => [...state, newAnswer]
+);
+
+async function next(stepId: string, value: string) {
+  addOptimistic({ stepId, value }); // UI обновился мгновенно
+  const result = await saveAnswer(stepId, value); // Server Action
+  if (result?.error) toast.error(result.error); // если упало — `useOptimistic` сам откатится при следующем рендере с реальным state
+}
+```
+
+**Для лид-формы `useOptimistic` обычно не нужен.** Лид и так считается успешным: при падении CRM отрабатывает fallback в `data/leads.json`, для пользователя это всё равно «отправлено». `isPending` из `useActionState` показывает спиннер на кнопке — этого достаточно.
+
+`useOptimistic` оправдан там, где **есть осмысленный «откат»**: пользователь видит, что выбор отменён, или появляется toast «не удалось сохранить, попробуйте ещё раз». Не вставляйте паттерн ради паттерна.
 
 ## Глобальная модалка консультации
 

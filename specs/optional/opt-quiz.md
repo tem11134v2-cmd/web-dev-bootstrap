@@ -10,7 +10,7 @@
 - docs/conversion-patterns.md (раздел «Quiz как конверсионный инструмент»)
 - docs/forms-and-crm.md (форма-результат отправляется так же как обычный лид)
 - `lib/consultation-context.tsx` (если квиз триггерит модалку)
-- `app/api/lead/route.ts` (расширим под квиз-данные)
+- `app/actions/submit-lead.ts` (расширим под квиз-данные)
 
 ## Goal
 
@@ -41,7 +41,7 @@
 
 ### 3. Интеграция с лид-системой
 
-6. На финальном submit — POST на `/api/lead` с дополнительным полем `quizAnswers: Record<string, string>`
+6. На финальном submit — вызов Server Action `submitLead` через `useActionState` с дополнительным полем `quizAnswers` (сериализовать в hidden-инпут как JSON-строку: `<input type="hidden" name="quizAnswers" value={JSON.stringify(answers)} />`, на сервере распарсить и расширить Zod-схему)
 7. В `lib/crm.ts` — мапить `quizAnswers` в кастомные поля CRM (например, в AMO как note или дополнительные поля сделки)
 8. Sonner toast: «Спасибо! Мы свяжемся с вами на основании ваших ответов»
 

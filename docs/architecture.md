@@ -16,8 +16,8 @@ project/
 │   ├── favicon.ico, icon.svg
 │   ├── (services)/             # Группа страниц услуг (route group)
 │   ├── blog/                   # Блог (опционально)
-│   ├── api/
-│   │   └── lead/route.ts       # Единый endpoint форм
+│   ├── actions/
+│   │   └── submit-lead.ts      # Server Action для всех форм лидов
 │   └── [other-pages]/
 ├── components/
 │   ├── ui/                     # shadcn/ui примитивы
@@ -51,7 +51,7 @@ project/
 **SSG (Static Site Generation).**
 - Все публичные страницы — пререндер при сборке.
 - ISR для контента с обновлениями (блог).
-- API routes для динамики (формы).
+- **Server Actions для форм** (вместо Route Handlers `/api/*`) — мутации идут через `<form action={serverAction}>` + `useActionState`. Подробнее — `docs/forms-and-crm.md`.
 
 **MDX через Content Collections.**
 - Файлы в git, нет БД, нет CMS.

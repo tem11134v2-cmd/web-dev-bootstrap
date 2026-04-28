@@ -129,7 +129,7 @@ pnpm install --frozen-lockfile && pnpm build && pm2 restart {site}-prod
 
 1. На VPS: `tail ~/prod/{site}/data/leads.json` — есть ли свежие записи?
 2. Если есть в файле, но нет в CRM — токен/webhook сломались. Обновить `.env` → `pm2 restart`.
-3. Если в файле пусто — /api/lead сам не отрабатывает. Проверить `pm2 logs {site}-prod` на 500-е.
+3. Если в файле пусто — Server Action `submitLead` сам не отрабатывает. Проверить `pm2 logs {site}-prod` на ошибки.
 
 ### Сайт работает медленно
 
