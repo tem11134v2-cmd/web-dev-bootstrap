@@ -62,20 +62,24 @@ xcode-select --install
 
 Проверка: `brew --version`
 
-### 0.4. GitHub CLI (gh) + Node.js
+### 0.4. GitHub CLI (gh) + Node.js + pnpm
 
 ```bash
 brew install gh node
+corepack enable
+corepack prepare pnpm@latest --activate
 ```
 
-Проверка: `gh --version && node --version && npm --version`
+`corepack` идёт в комплекте с Node 16.13+, активирует pnpm одной командой — отдельный `brew install pnpm` не нужен.
+
+Проверка: `gh --version && node --version && pnpm --version`
 
 Должно вывести что-то вроде:
 
 ```
 gh version 2.x.x ...
 v22.x.x         ← важно: 22 или новее (Next.js 16 требует)
-10.x.x
+9.x.x           ← pnpm
 ```
 
 Если `node --version` показывает меньше `v22` — `brew upgrade node`.

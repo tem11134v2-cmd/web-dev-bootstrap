@@ -166,9 +166,9 @@ if ! swapon --show | grep -q swapfile; then
 fi
 
 # ─────────────────────────────────────────────
-# 5. Стек: Node, Caddy, git, PM2
+# 5. Стек: Node, pnpm, Caddy, git, PM2
 # ─────────────────────────────────────────────
-log "[5/8] Stack (Node $NODE_MAJOR, Caddy, git, PM2)"
+log "[5/8] Stack (Node $NODE_MAJOR, pnpm via corepack, Caddy, git, PM2)"
 if ! command -v node >/dev/null || [ "$(node -v | cut -c2- | cut -d. -f1)" != "$NODE_MAJOR" ]; then
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null
 fi
@@ -185,7 +185,14 @@ if [ ! -f /etc/apt/sources.list.d/caddy-stable.list ]; then
   apt-get update -qq
 fi
 apt-get install -y -qq nodejs caddy git
-npm install -g pm2 >/dev/null 2>&1 || npm install -g pm2
+
+# pnpm через corepack (он идёт в комплекте с Node 16.13+). Активируем системно,
+# чтобы и root, и deploy получили рабочий бинарник /usr/local/bin/pnpm.
+corepack enable >/dev/null
+corepack prepare pnpm@latest --activate >/dev/null
+
+# PM2 ставим через pnpm — для консистентности с остальной инфрой (npm на VPS не нужен).
+pnpm add -g pm2 >/dev/null 2>&1 || pnpm add -g pm2
 
 # ─────────────────────────────────────────────
 # 6. Папки и реестр портов (под deploy)
