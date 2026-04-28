@@ -22,7 +22,7 @@
                                    │  ~/prod/{site}/  :3010  │ ← main
                                    │  ~/dev/{site}/   :4010  │ ← dev (опц.)
                                    │         ▼               │
-                                   │       nginx + SSL       │
+                                   │      Caddy + ACME       │
                                    │    domain.com           │
                                    │    dev.domain.com (опц.)│
                                    └─────────────────────────┘
@@ -47,7 +47,7 @@
 
 По желанию проекта. Варианта два:
 
-1. **Поддомен `dev.domain.com` на том же VPS.** GitHub Actions деплоит ветку `dev` в папку `~/dev/{site}/` с отдельным портом (4xxx) и отдельным server_name в nginx. Плюс: всегда свежая копия, та же среда что и прод. Минус: ещё один PM2-процесс + nginx-секция + SSL.
+1. **Поддомен `dev.domain.com` на том же VPS.** GitHub Actions деплоит ветку `dev` в папку `~/dev/{site}/` с отдельным портом (4xxx) и отдельным блоком в Caddyfile. Плюс: всегда свежая копия, та же среда что и прод. Минус: ещё один PM2-процесс + ещё один блок в `Caddyfile.d/{site}.caddy` (SSL Caddy выпустит сам).
 2. **Cloudflare Tunnel / ngrok с Mac.** Быстрый временный публичный URL к `localhost:3000`. Плюс: никакой инфры. Минус: работает только пока Mac запущен и тоннель открыт — на продакшн-preview не годится.
 
 Для клиентских проектов по умолчанию — вариант 1. Для MVP/демок — 2.
@@ -137,7 +137,7 @@ npm ci && npm run build && pm2 restart {site}-prod
 
 **Базовая настройка:**
 1. Делегируй NS домена на Cloudflare (через регистратора).
-2. SSL/TLS mode: **Full (strict)** — чтобы CF проверял твой Let's Encrypt.
+2. SSL/TLS mode: **Full (strict)** — чтобы CF проверял Let's Encrypt-сертификат, выписанный Caddy.
 3. Always Use HTTPS: ON.
 4. Auto Minify (CSS/JS/HTML): OFF — Next уже делает.
 5. Brotli: ON.
@@ -145,5 +145,6 @@ npm ci && npm run build && pm2 restart {site}-prod
 7. Page Rules для статики `*/_next/static/*` — Cache Everything, Edge TTL = 1 month.
 
 **Подводные камни:**
+- **HTTP-01 challenge через Cloudflare proxy не работает** — CF перехватывает `/.well-known/acme-challenge/`. Чтобы Caddy мог выписать первый сертификат: временно выключи proxy (серое облачко = DNS only), дождись выпуска (`journalctl -u caddy | grep "certificate obtained"`), включи proxy обратно. Альтернатива — DNS-01 challenge через Caddy plugin для Cloudflare (`xcaddy build` с `caddy-dns/cloudflare`), но это отдельная сборка Caddy.
 - Cloudflare кеширует HTML — после релиза контент может не обновиться. Решение: не кэшировать `.html`, либо purge по API в GitHub Actions после деплоя.
-- IP клиента в nginx-логах = IP Cloudflare. Чтобы видеть реальный — `set_real_ip_from` + `real_ip_header CF-Connecting-IP` в nginx (см. `docs/server-manual-setup.md`).
+- IP клиента в логах Caddy = IP Cloudflare. Чтобы видеть реальный — добавь в site-блок `Caddyfile.d/{site}.caddy` директиву `trusted_proxies cloudflare` + Caddy-плагин `caddy-trusted-proxy-cloudflare` (или вручную перечисли CF-диапазоны).
