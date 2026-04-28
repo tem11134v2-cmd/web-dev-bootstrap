@@ -184,12 +184,61 @@ cd migrator
 
 > Если переезжаешь с уже работающего сайта (Tilda, WordPress, …) — **не используй `--template`**. Создай пустой репо и читай `specs/optional/opt-migrate-from-existing.md` или `specs/14-migrate.md`.
 
+## 1.5. Клонировать существующий проект (новый Mac, или второй компьютер)
+
+Если сайт уже есть на GitHub (твой или у работодателя) и ты хочешь поднять его на новой машине — это другой поток, не §1. Прошёл §0 (Mac готов), теперь:
+
+```bash
+cd ~/projects
+gh repo clone <owner>/{site}        # owner — владелец репо, может совпадать с тобой
+cd {site}
+mise install                         # подхватит версии из .tool-versions
+pnpm install                         # установит зависимости из pnpm-lock.yaml
+pnpm dev                             # → http://localhost:3000
+```
+
+**Чего не приедет с git'а** (и придётся достать отдельно, если нужно):
+
+- **`.env.production`** — gitignored. Сайт запустится в **fallback-режиме** (формы пишут лиды в `data/leads.json`), для прода нужен реальный `.env`. Варианты:
+  - Принести с предыдущего Mac (через 1Password / iCloud Drive / scp)
+  - Спросить у владельца, если ты collaborator
+  - Достать из GitHub Environment: `gh secret list --env production --repo <owner>/{site}` покажет имена секретов (значения GitHub не отдаёт даже владельцу — только для деплоев)
+- **SSH-ключ к VPS** — если ты владелец инфры, твой ключ `~/.ssh/id_ed25519` уже на новом Mac (см. §0.6). Если ты collaborator — VPS-доступа у тебя нет (см. §7), это нормально.
+- **Локальные `.claude/state/`** — gitignored, восстановится сам в первой сессии.
+
+**Что приедет** (важно): актуальный код, `docs/`, `specs/`, `.claude/memory/` (project_state, decisions, lessons и т.д.), хуки, скрипты, slash-команды.
+
+После `pnpm dev` — открывай Claude Desktop в этой папке и работай по §5 («Вернуться к уже начатому сайту») — `/resume` восстановит контекст из памяти.
+
 ## 2. Открыть в Claude Desktop
 
 - Claude Desktop → **+ New chat** (Cmd+N).
 - **Select folder** → `~/projects/{site}`.
 
 При первом открытии папки macOS может спросить разрешение «Claude wants access to folder» — нажми **Allow** (разово, дальше не спрашивает).
+
+### Что делать с выбором ветки и worktree
+
+Claude Desktop при открытии может предложить:
+
+- **Branch:** какая ветка стартовать. По умолчанию — `main`. Если ты сразу знаешь, что будешь работать в feature-ветке — можно выбрать её, или оставить `main` и Claude сам её создаст когда нужно.
+- **Worktree:** изолировать Claude в отдельный git worktree (отдельная папка `_BUILD/.claude/worktrees/<auto-name>/` со своей веткой `claude/<auto-name>`).
+
+**Что такое worktree** — это стандартный git-механизм: несколько рабочих деревьев одного репо в разных папках, на разных ветках одновременно. У всех общий `.git`, но разные checkouts.
+
+**Что выбирать** (правило большого пальца):
+
+| Ситуация | Worktree? |
+|---|---|
+| Простая задача (правка текста, добавить компонент) | **Нет** — основная папка |
+| Большой эксперимент (рефакторинг, миграция, риск что-то сломать) | **Да** — изолированный worktree |
+| Параллельно правишь файлы руками + просишь Claude что-то параллельно | **Да** — чтобы не конкурировать за рабочее дерево |
+| Новый сайт из шаблона (§1) | **Нет** — там нечего изолировать |
+| Не знаешь что выбрать | **Нет** — основная папка по умолчанию |
+
+**Минус worktree** — изменения Claude'а в worktree не видны в основной папке, пока не сольются через PR. Если хочешь сразу видеть правки в `~/projects/{site}/` — основная папка проще.
+
+**Важно про worktree + multi-Claude:** даже на разных Mac'ах (или в разных worktree на одном Mac) **только одна Claude-сессия за раз** должна писать в `.claude/memory/project_state.md` — иначе git-merge сломает журнал. Сначала закончи одну сессию (`/handoff`) — потом начинай вторую (`/resume`). См. §7 про multi-developer и Multi-Claude protocol в `CLAUDE.md`.
 
 ## 3. Первое сообщение Claude
 
@@ -198,6 +247,37 @@ cd migrator
 ```
 
 При старте каждой сессии Claude запускает `.claude/hooks/session-start.sh`, который сам делает `git fetch` и подсказывает если ветка отстала. Поэтому ритуал «не забудь pull» больше не на тебе.
+
+## 3.5. Первый деплой на сервер
+
+Когда сайт минимально готов (главная страница рендерится, бриф заполнен) — пора поднимать VPS.
+
+**Если у тебя ещё нет VPS под этот сайт:**
+
+```
+В Claude (продолжая ту же сессию или в новой):
+Прочитай specs/01b-server-handoff.md и проведи меня по нему.
+```
+
+Спека `01b` пошагово:
+1. Проверит, что у тебя готов VPS (если нет — отправит на `01a` + `bootstrap-vps.sh` для свежего Ubuntu)
+2. Сгенерирует SSH-ключ деплоя (`~/.ssh/{site}-deploy`), положит публичную часть в `authorized_keys` пользователя `deploy` на VPS
+3. Создаст в GitHub репо Environment `production` и положит туда секреты:
+   - `SSH_PRIVATE_KEY` (приватный из Mac)
+   - `SSH_HOST`, `SSH_USER`, `SSH_PORT`
+   - `PROD_ENV_FILE` (всё содержимое `.env.production`)
+4. Создаст `.github/workflows/deploy-prod.yml` (push-based: build на runner → rsync → симлинк-релиз)
+5. Зарегистрирует домен (см. `docs/domain-connect.md`) и пропишет A-запись на IP VPS
+6. Сделает первый push в `main` → Actions запустит первый деплой → Caddy получит сертификат при первом HTTPS-запросе
+
+**Если VPS уже есть** (на нём другие сайты) — пройди только спеку `docs/server-add-site.md` (Claude умеет): выделит порт, добавит Caddy-блок, прокинет PM2-процесс. Потом `01b` для GitHub Actions.
+
+После первого зелёного workflow:
+```bash
+curl -I https://{domain}/      # должен вернуть 200 OK
+```
+
+Если упало — открой Actions tab в GitHub, посмотри какой шаг красный. Чаще всего: `SSH_PRIVATE_KEY` не в Environment (а в repo-level), или DNS ещё не распространился. См. «Известные грабли» в `_BUILD/v3/02-migrate-existing-project.md`.
 
 ## 4. Работа изо дня в день
 
@@ -234,11 +314,67 @@ Stop-хук подскажет про `/handoff` если в сессии был
 
 ## 7. Подключить второго разработчика
 
+### 7.1. Подготовка репо (один раз)
+
+До приглашения коллеги — убедись, что:
+
+```bash
+# Ветка dev существует (это рабочая ветка коллабораторов; main защищён)
+git ls-remote --heads origin dev | grep -q dev || \
+  (git checkout -b dev && git push -u origin dev && git checkout main)
+
+# (Опционально, если у тебя GitHub Pro / public репо) включить branch protection на main
+gh api -X PUT repos/{owner}/{repo}/branches/main/protection \
+  -F required_pull_request_reviews.required_approving_review_count=1 \
+  -F enforce_admins=false 2>&1 || echo "Skipping protection (private repo on free plan)"
+```
+
+### 7.2. Пригласить коллегу
+
 1. Узнай GitHub-логин коллеги (например, `alice`).
 2. Открой Claude в проекте, скажи: «добавь `alice` как collaborator с правами Write».
 3. Дай ей ссылку на `docs/team-onboarding.md` в репо.
 
-**Не давай:** SSH к VPS, deploy_key, root-пароли, GitHub Secrets. Это намеренная граница.
+### 7.3. Граница доступа
+
+**Не давай:** SSH к VPS, `deploy_key` (он же `SSH_PRIVATE_KEY` в Environment), root-пароли, GitHub Environment Secrets. Это намеренная граница: коллабораторы пишут код, Actions деплоит, владелец держит инфру.
+
+**Что коллеге доступно:**
+- Read/Write на код (через PR в `dev`)
+- `.claude/memory/` файлы — да, синхронизируются через git (см. ниже про конфликты)
+- `data/leads.json` — нет, это runtime data, gitignored
+- `.env.production` — нет, gitignored
+
+### 7.4. Multi-Claude protocol для коллабораторов
+
+Каждый разработчик работает в своей feature-ветке от `dev`. Это **изолирует код**, но `.claude/memory/project_state.md` всё равно один на проект — поэтому правило:
+
+- **Параллельные Claude-сессии на ОДИН проект (даже с разных Mac'ов) запрещены.** Один пишет в `project_state.md` → другой не должен открывать `/resume` пока первый не сделал `/handoff` + push своей ветки.
+- На практике достаточно: «один разработчик в проекте за раз», свободно созваниваться или писать в чат.
+- Для **разных проектов** (alice работает над сайтом A, я над сайтом B) — никаких ограничений, параллелим свободно.
+
+### 7.5. Memory-файлы и git-merge
+
+`.claude/memory/*.md` коммитятся вместе с feature-ветками. На PR это **может вызвать merge-конфликт**, чаще всего в `project_state.md` (он active, оба пишут). Как разруливать:
+
+```bash
+# В feature-ветке после rebase'а на dev (или при merge'е PR):
+# Конфликты в .claude/memory/project_state.md — это log-файл, оба правы.
+
+git status                                    # увидишь файлы с конфликтом
+# Открой project_state.md, объедини обе записи в Session log вручную
+# (это просто текст — оба разработчика добавили свою запись в журнал)
+git add .claude/memory/project_state.md
+git rebase --continue  # или git commit, если был merge
+
+# Для decisions.md / lessons.md / feedback.md (append-only журналы)
+# — то же самое: открыл, объединил записи, добавил.
+```
+
+**Чтобы конфликтов было меньше**:
+- Каждый перед началом работы: `git pull origin dev` + `/resume` (Claude увидит свежий `project_state.md`)
+- В конце сессии: `/handoff` (Claude обновит memory) → коммит + push в свою feature-ветку
+- В PR — мердж в `dev` через GitHub UI (UI часто умеет merge простых конфликтов сам)
 
 ## 8. Секреты на VPS
 
@@ -317,8 +453,9 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 | `~/projects/{site}/.env.production` | Локальные секреты (gitignored). Источник истины для `PROD_ENV_FILE` GitHub-секрета — после правки делай `gh secret set --env production PROD_ENV_FILE < ...` и пуш в main |
 | `~/Downloads/HOW-TO-START.docx` | Этот файл (docx-версия для печати) |
 | `~/ClaudeCode/web-dev-bootstrap/` | Исходный шаблон (редактируется когда улучшаешь сам алгоритм) |
-| `~/.ssh/config` | Алиасы SSH к серверам (`{site}-new` и т.п.) |
-| `~/.ssh/id_ed25519` | Твой личный SSH-ключ (не удалять, не показывать никому) |
+| `~/.ssh/config` | Алиасы SSH к серверам (`Host {site}` → IP, ключ; см. `docs/server-add-site.md`) |
+| `~/.ssh/id_ed25519` | Твой личный SSH-ключ для GitHub и для входа на VPS как root/sudo |
+| `~/.ssh/{site}-deploy` | Per-site deploy-ключ (опционально). Публичная часть в `authorized_keys` пользователя `deploy` на VPS, приватная — в GitHub Environment Secret `SSH_PRIVATE_KEY` |
 
 ## Что делать дальше (после запуска первого сайта)
 
