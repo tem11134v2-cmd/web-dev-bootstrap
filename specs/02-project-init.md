@@ -72,7 +72,7 @@
 10. Создать пустую `app/page.tsx` (просто `<main>Hello</main>` — наполнение в спеке 04)
 11. Скопировать `CLAUDE.md` из bootstrap в корень проекта, заполнить секцию `Project: [name]`
 12. Первый коммит: `chore: initial Next.js setup`
-13. Проверка: `npm run dev` — открыть localhost:4000 — пустая страница без ошибок в консоли
+13. Проверка: `npm run dev` — открыть localhost:3000 — пустая страница без ошибок в консоли
 
 ## Boundaries
 
