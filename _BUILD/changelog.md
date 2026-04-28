@@ -1,5 +1,56 @@
 # Changelog
 
+## v3.0 — 2026-04-29 · Multi-Claude handoff protocol + final bootstrap-refactor release
+
+Финальная Phase 6 рефакторинга `_BUILD/v3/01-bootstrap-refactor.md`. Закрывает sequential multi-Claude протокол (одна сессия = одна задача, передача состояния через память), синхронизирует `_BUILD/claude-md-template.md` с актуальным `CLAUDE.md`, обновляет HOW-TO-START под slash-команды и новые секции, ставит тег `v3.0` — конец большого рефакторинга bootstrap'а. Сам bootstrap-репо ничего не билдит — изменения проявятся только в новых проектах из шаблона.
+
+- **Sequential multi-Claude протокол.** Одна Claude-сессия = одна задача (одна спека). Параллельные сессии на ОДНУ папку проекта запрещены — они не видят друг друга и поломают `.claude/memory/project_state.md`. Передача между сессиями — через три новые slash-команды, лежащие в `.claude/commands/` (Claude Code Desktop сканирует папку автоматически, регистрация в `settings.json` не нужна): `/handoff` финализирует сессию (запись в `Session log` файла `project_state.md` с Done/Open/Uncommitted/Resume hint, обновление `Active phase` + `Next steps`, спрашивает про uncommitted-изменения), `/resume` стартует следующую (читает память, сверяет с git-state — порчинг + last commits + HEAD sha; при расхождении стопает и просит решения), `/catchup` даёт быструю ориентацию по `git log main..HEAD` + diff stat. В корневой `CLAUDE.md` и в `_BUILD/claude-md-template.md` добавлен раздел `## Multi-Claude protocol` — новые сайты сразу получают правило.
+- **Stop-хук как мягкое напоминание.** `.claude/hooks/stop-reminder.sh` срабатывает на Stop-event Claude'а (после каждого ответа). Без фильтра пользователь получал бы спам — поэтому хук сравнивает текущий `git rev-parse HEAD` с зафиксированным на `SessionStart` (запись в `/tmp/.claude-session-start-sha-$PPID`, `$PPID` изолирует параллельные Claude-инстансы). Совпало — silent exit. HEAD сменился — печатает в stderr напоминание про `/handoff`. `.claude/hooks/session-start.sh` дополнен строкой записи sha; `.claude/settings.json` зарегистрировал Stop-хук.
+- **Шаблон `_BUILD/claude-md-template.md` пересинхронизирован с `CLAUDE.md`.** До Phase 6 шаблон отставал: в живом `CLAUDE.md` была секция `Automation rules` (session-start, before-push, secrets через `PROD_ENV_FILE` GitHub Environment Secret, симлинк-rollback), а шаблон, который копируется в новые сайты — нет. Теперь `diff CLAUDE.md _BUILD/claude-md-template.md` показывает только различия в header-комментариях (BOOTSTRAP META auto-loader vs инструкция шаблона) и встроенных placeholder-подсказках (Stack default, dev port). Stack-комментарий в шаблоне обновлён на `Дефолт v3.0`.
+- **`.claude/memory/project_state.md` структурирован.** Новый формат: `Active phase` / `Active spec` / `Blockers` / `Next 1-3 steps` / `Session log` (заполняется `/handoff`) / `Completed phases history` (или `Completed specs history` для site-проектов). Развёрнутые описания фаз 0–5 переехали в этот changelog как источник истины — в `project_state.md` остались одностроки + ссылки на PR. Файл двойного назначения: для bootstrap-refactor отслеживает фазы; для сайтов после `gh repo create --template` пользователь стирает содержимое и заполняет под свой проект (инструкция в HTML-комментарии в начале файла).
+- **`_BUILD/HOW-TO-START.md` финиш.** Phase 5 ранее переписала §§ 8–9 (секреты + откат) под push-deploy; Phase 6 закрывает остаток. §4 «Работа изо дня в день» описывает полный цикл с `/handoff` и упоминает stop-reminder. §5 «Вернуться к уже начатому сайту» — промпт заменён на `/resume`, запасной длинный промпт оставлен на случай ранних версий Claude Desktop без сканирования `.claude/commands/`. §10 (новый) — миграция старого сайта (v2.x) на v3.0 через `_BUILD/v3/02-migrate-existing-project.md`. §11 (новый) — обновление самого bootstrap (для разработчика). «Частые косяки» — добавлены пункты «Claude залип / повторяет круги → /clear → /resume» и «После /resume Claude в другой фазе → поправь project_state.md руками». Шапка — версия v3.0, заметка про `~/Downloads/HOW-TO-START.docx` (синхронизирован с v2.2.1, регенерация через pandoc — post-v3.0 outstanding task).
+- **Severity-A финал.** `README.md` H1 v2.3-dx → v3.0, блок «## Версия» переписан под v3.0 (Caddy / push-deploy / standalone / Biome / pnpm-mise / Turnstile / Content Collections / Server Actions / use cache + PPR + OKLCH / multi-Claude). `CLAUDE.md` BOOTSTRAP META: «v2.0 → v2.3.x» → «v2.0 → v3.0», пример semver-тегов «v2.3-dx, v2.4.0» → «v3.0.1, v3.1, v4.0». `docs/INDEX.md` строка про `automation.md` дополнена stop-reminder + slash-командами. В `_BUILD/v3/01-bootstrap-refactor.md` добавлен подраздел «Outstanding после v3.0 (не блокируют тег)» с двумя пунктами: pandoc-регенерация .docx + первый реальный push-deploy на live-VPS (Phase 5 покрыта только письменной верификацией, не обкатывалась).
+
+**8 атомарных коммитов в ветке `feat/v3.0-handoff-protocol`** (от старого к новому): `feat(memory-template)`, `feat(commands)`, `feat(stop-reminder)`, `docs(how-to-start)`, `docs(claude-md-template)`, `docs(claude-md)`, `chore(final-check)`, `chore(memory)` (этот коммит — changelog + project_state финал).
+
+### Что в итоге в bootstrap v3.0 (vs v2.2.1)
+
+- **Caddy** заменил nginx + certbot + cron renewal — auto-HTTPS из коробки (Let's Encrypt + ZeroSSL fallback), multi-site через `import /etc/caddy/Caddyfile.d/*.caddy` (Phase 1).
+- **Push-based deploy** через GitHub Actions: build standalone-артефакта на `ubuntu-latest` runner → upload artifact → deploy job rsync'ит `releases/<github.sha>/` → `ln -sfn current/` → `pm2 reload`. На VPS больше не нужен Node toolchain (только runtime + PM2), git с VPS убран (Phase 5).
+- **Раздельные SSH-ключи**: приватный — только в GitHub Secrets, на VPS — публичный в `authorized_keys`. Старый `~/.ssh/deploy_key` на VPS убран как класс — git pull больше не нужен (Phase 5).
+- **`output: 'standalone'`** в Next.js 16 шаблоне `next.config.ts` — компактный rsync-артефакт без `node_modules` целиком (Phase 5).
+- **`.env`** через GitHub Environment Secret `PROD_ENV_FILE` (multiline = всё содержимое `.env.production`) — приходит в момент деплоя, не лежит постоянно на VPS. `scripts/sync-env.sh` остаётся как fallback (Phase 5).
+- **Атомарный rollback** через `ln -sfn` на предыдущий релиз в `releases/<previous-sha>/` — миллисекунды, без пересборки. `scripts/rollback.sh` сигнатура `[site] [ssh_alias]` без `<commit-hash>` (Phase 5).
+- **Server Actions** для лид-форм (`useActionState` + `<form action={...}>`) — endpoint `/api/lead` больше не создаётся в новых проектах (прогрессивное улучшение, CSRF из коробки, типизированный `LeadState`). Phase 4.
+- **`use cache`** директива (опционально, для тяжёлых server-функций / server-компонентов; критерии когда НЕ применять — per-request state, cookies/headers/searchParams). Phase 4.
+- **Partial Prerendering** (`experimental.ppr: 'incremental'`, opt-in per-route через `experimental_ppr = true`) — для лендингов с гибридным static+dynamic. Phase 4.
+- **OKLCH** в Tailwind v4 (`@theme { --color-primary: oklch(0.45 0.15 250); }`) — предсказуемое осветление через `L`, перцептивно ровный hover через `color-mix in oklch`, поддержка широких гамм P3/Rec2020. HEX из брифа в комментариях рядом как source of truth от заказчика. Phase 4.
+- **Cloudflare Turnstile** в формах — бесплатный invisible CAPTCHA от Cloudflare, проверка токена ДО CRM в Server Action, `@marsidev/react-turnstile` на клиенте. Phase 3.
+- **Content Collections** для MDX — типобезопасный стек, frontmatter валидируется Zod-схемой в `content-collections.ts`, импорт типизированного `allPosts` (вместо `next-mdx-remote` + ручного `gray-matter`). Phase 3.
+- **Biome** заменил ESLint + Prettier — один бинарник, ~10× быстрее, встроенная сортировка Tailwind-классов через `useSortedClasses`. Phase 2.
+- **pnpm** через corepack/mise — hardlinks вместо копирования при multi-site, экономия диска на VPS (5–10 сайтов на одном VPS). Phase 2.
+- **mise** заменил nvm — единый менеджер версий для Node + pnpm + любого тулинга, читает `.tool-versions` автоматически на `cd`. Phase 2.
+- **schema-dts** для типобезопасных JSON-LD — `WithContext<Service>`, `WithContext<BreadcrumbList>`, опечатка в `@type` ловится `tsc --noEmit` на билде. Phase 2.
+- **Sequential multi-Claude протокол** через `/handoff` + `/resume` + `/catchup` slash-команды + stop-reminder hook. Phase 6.
+
+### Breaking changes для проектов на v2.x
+
+- `npm` → `pnpm` (нужен `corepack enable` или `mise use pnpm`)
+- `nginx` + `certbot` → `Caddy` на VPS (миграция через `_BUILD/v3/02-migrate-existing-project.md`, раздел «nginx → Caddy»)
+- Pull-based deploy (git pull + build на VPS) → push-based (build на runner + rsync артефакта). На VPS больше не нужен Node toolchain.
+- Route Handler `app/api/lead/route.ts` → Server Action `app/actions/submit-lead.ts` (миграция точечная — старые проекты на Route Handler продолжают работать).
+- ESLint + Prettier → Biome (один конфиг `biome.json`).
+- `next-mdx-remote` + `gray-matter` → Content Collections (если в проекте есть MDX-блог).
+
+### Миграция старых проектов
+
+См. `_BUILD/v3/02-migrate-existing-project.md` — точечная по разделам, можно делать любое подмножество. Не обязательная: старые проекты на v2.x могут оставаться на v2.x неограниченно.
+
+### Outstanding после v3.0 (не блокируют тег)
+
+- ⏳ Регенерация `_BUILD/HOW-TO-START.docx` через pandoc (текущий синхронизирован с v2.2.1; pandoc-конвертация требует ручного причёсывания стилей/оглавления — отдельный таск).
+- ⏳ Первый реальный push-based деплой на live-VPS — Phase 5 покрыта только письменной верификацией + rollback-планом, не обкатывалась.
+
 ## v3.0-deploy — 2026-04-28 · Push-based deploy + standalone + раздельные SSH-ключи
 
 Фаза 5 рефакторинга `_BUILD/v3/01-bootstrap-refactor.md`. Самая рискованная фаза: переход с **pull-based** деплоя (Actions → SSH → `git pull` + `pnpm install` + `pnpm build` на VPS → `pm2 restart`) на **push-based** (build на GitHub-runner → `rsync` standalone-артефакта → атомарный switch симлинка `current → releases/<sha>` → `pm2 reload`). Билд больше не идёт на проде, VPS превращён в тонкий runtime (Node + Caddy + PM2, без git и pnpm), приватный SSH-ключ живёт исключительно в GitHub Secrets, а откат — это `ln -sfn` + `pm2 reload` за миллисекунды без пересборки.
