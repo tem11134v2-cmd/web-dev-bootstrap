@@ -59,7 +59,7 @@
 ### 4. Чистка дублей и canonical
 
 8. Каждая страница имеет уникальный canonical (см. metadata.alternates.canonical)
-9. Проверить нет ли страниц с одинаковыми title/description (через `npm run build` + ручной обход)
+9. Проверить нет ли страниц с одинаковыми title/description (через `pnpm build` + ручной обход)
 10. Закрыть от индексации страницы с GET-параметрами (уже в robots.ts через `/*?*`)
 
 ### 5. Yandex-специфика

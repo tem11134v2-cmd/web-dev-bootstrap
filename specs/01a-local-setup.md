@@ -21,7 +21,7 @@ Claude проверяет через Bash:
 
 ```bash
 node -v              # ≥ 22
-npm -v               # ≥ 10
+pnpm -v              # ≥ 9
 git --version        # ≥ 2.40
 gh --version         # ≥ 2.0, и `gh auth status` подтверждает login
 ```
@@ -56,7 +56,7 @@ ssh -T git@github.com
 - Локальный путь проекта: `~/projects/{site}` (абсолютный).
 - GitHub URL репо.
 - Ветки: `main` (prod, protected), `dev` (integration).
-- Версии `node`, `npm`, ссылка на `.nvmrc` если есть.
+- Версии `node`, `pnpm`, ссылка на `.tool-versions` если есть.
 - Email в git.
 
 ### 5. `.nvmrc` и lock-файл
@@ -70,7 +70,7 @@ ssh -T git@github.com
 
 Это чтобы на VPS (у которого `nvm` может быть) и у других разработчиков совпадала версия Node.
 
-Lock-файл (`package-lock.json`) появится в спеке `02-project-init` после `create-next-app`. Обязательно коммить его — GitHub Actions использует `npm ci`.
+Lock-файл (`pnpm-lock.yaml`) появится в спеке `02-project-init` после `create-next-app` и первого `pnpm install`. Обязательно коммить его — GitHub Actions использует `pnpm install --frozen-lockfile`.
 
 ## Boundaries
 

@@ -57,7 +57,7 @@
 8. Проверить mobile (375px), tablet (768px), desktop (1280px, 1920px)
 9. Проверить контраст текста (WCAG AA ≥ 4.5:1)
 10. Проверить отсутствие console errors
-11. `npm run build` — должен пройти без ошибок
+11. `pnpm build` — должен пройти без ошибок
 
 ### 4. Промежуточный деплой
 
@@ -89,7 +89,7 @@
 
 - Главная собрана из секций, тексты из docs/content.md
 - Mobile/tablet/desktop корректны
-- `npm run build` проходит
+- `pnpm build` проходит
 - Деплой на dev/prod выполнен
 - Заказчик дал явное «одобрено»
 - Тег `homepage-approved` создан

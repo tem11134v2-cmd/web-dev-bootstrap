@@ -31,7 +31,7 @@
 
 4. Установить:
    ```bash
-   npm install next-intl
+   pnpm add next-intl
    ```
 5. Создать `i18n/request.ts` (конфигурация next-intl)
 6. Создать `messages/ru.json` и `messages/en.json` — словари для UI:

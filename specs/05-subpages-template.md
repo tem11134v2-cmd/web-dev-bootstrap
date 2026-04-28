@@ -94,7 +94,7 @@ Server Component по умолчанию (нулевой клиентский JS
 11. `view-source` — убедиться что весь контент в HTML (не подгружается JS)
 12. Schema.org валидатор — Yandex Validator + Google Rich Results
 13. Адаптив, контраст, console errors
-14. `npm run build` проходит
+14. `pnpm build` проходит
 
 ## Boundaries
 
@@ -110,7 +110,7 @@ Server Component по умолчанию (нулевой клиентский JS
 - Одна страница услуги собрана и работает
 - view-source показывает весь контент в HTML
 - Schema.org валидируется
-- `npm run build` проходит
+- `pnpm build` проходит
 
 ## Memory updates
 
