@@ -166,9 +166,12 @@ if ! swapon --show | grep -q swapfile; then
 fi
 
 # ─────────────────────────────────────────────
-# 5. Стек: Node, pnpm, Caddy, git, PM2
+# 5. Стек: Node runtime, Caddy, PM2
 # ─────────────────────────────────────────────
-log "[5/8] Stack (Node $NODE_MAJOR, pnpm via corepack, Caddy, git, PM2)"
+# Под push-based deploy на VPS нужен только runtime: Node + PM2.
+# Билд (pnpm install + pnpm build) делает GitHub-runner; артефакт rsync-ится сюда.
+# Поэтому ни pnpm, ни git на VPS больше не нужны.
+log "[5/7] Stack (Node $NODE_MAJOR runtime, Caddy, PM2)"
 if ! command -v node >/dev/null || [ "$(node -v | cut -c2- | cut -d. -f1)" != "$NODE_MAJOR" ]; then
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null
 fi
@@ -184,20 +187,17 @@ if [ ! -f /etc/apt/sources.list.d/caddy-stable.list ]; then
     | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
   apt-get update -qq
 fi
-apt-get install -y -qq nodejs caddy git
+apt-get install -y -qq nodejs caddy
 
-# pnpm через corepack (он идёт в комплекте с Node 16.13+). Активируем системно,
-# чтобы и root, и deploy получили рабочий бинарник /usr/local/bin/pnpm.
-corepack enable >/dev/null
-corepack prepare pnpm@latest --activate >/dev/null
-
-# PM2 ставим через pnpm — для консистентности с остальной инфрой (npm на VPS не нужен).
-pnpm add -g pm2 >/dev/null 2>&1 || pnpm add -g pm2
+# PM2 ставим через npm (Node ставит его в комплекте). pnpm/corepack на VPS не
+# нужен — собираем не здесь. Standalone-сборка Next привозит свои node_modules
+# внутри артефакта.
+npm install -g pm2 >/dev/null 2>&1 || npm install -g pm2
 
 # ─────────────────────────────────────────────
 # 6. Папки и реестр портов (под deploy)
 # ─────────────────────────────────────────────
-log "[6/8] Folders + ports registry"
+log "[6/7] Folders + ports registry"
 sudo -u "$DEPLOY_USER" mkdir -p "/home/$DEPLOY_USER/prod" "/home/$DEPLOY_USER/dev"
 if [ ! -f "/home/$DEPLOY_USER/ports.md" ]; then
   sudo -u "$DEPLOY_USER" tee "/home/$DEPLOY_USER/ports.md" >/dev/null <<'MD'
@@ -211,23 +211,16 @@ MD
 fi
 
 # ─────────────────────────────────────────────
-# 7. Deploy key для GitHub Actions
+# 7. Caddy: базовый Caddyfile + папка для per-site конфигов
 # ─────────────────────────────────────────────
-log "[7/8] GitHub Actions deploy key"
-if [ ! -f "/home/$DEPLOY_USER/.ssh/deploy_key" ]; then
-  sudo -u "$DEPLOY_USER" ssh-keygen -t ed25519 \
-    -f "/home/$DEPLOY_USER/.ssh/deploy_key" -N '' \
-    -C "github-actions@$(hostname)" >/dev/null
-  cat "/home/$DEPLOY_USER/.ssh/deploy_key.pub" >> "/home/$DEPLOY_USER/.ssh/authorized_keys"
-  sudo -u "$DEPLOY_USER" sort -u "/home/$DEPLOY_USER/.ssh/authorized_keys" \
-    -o "/home/$DEPLOY_USER/.ssh/authorized_keys"
-  chmod 600 "/home/$DEPLOY_USER/.ssh/authorized_keys"
-fi
-
-# ─────────────────────────────────────────────
-# 8. Caddy: базовый Caddyfile + папка для per-site конфигов
-# ─────────────────────────────────────────────
-log "[8/8] Caddy config"
+# Раньше здесь был шаг «GitHub Actions deploy key» — генерация
+# ~/.ssh/deploy_key (приватный) на VPS для git pull в Actions.
+# При push-based deploy (v3.0-deploy) приватный ключ живёт ТОЛЬКО в
+# GitHub Secrets; на VPS лежит исключительно публичная часть в
+# /home/deploy/.ssh/authorized_keys (положена в шаге [1/7]).
+# Single-purpose deploy-ключ генерируется на Mac разработчика в
+# spec 01b-server-handoff и докладывается на VPS через ssh-copy-id.
+log "[7/7] Caddy config"
 install -d -m 755 /etc/caddy/Caddyfile.d
 
 cat > /etc/caddy/Caddyfile <<CFG
@@ -263,10 +256,11 @@ log "Bootstrap complete."
 printf '\n\033[1;32m✓ Server ready.\033[0m\n'
 printf 'SSH:        ssh -p %s %s@<IP>\n' "$SSH_PORT" "$DEPLOY_USER"
 printf 'Deploy user: %s (sudo NOPASSWD, SSH key-only)\n' "$DEPLOY_USER"
-printf 'Stack:       Node %s, Caddy %s, PM2 %s\n' \
+printf 'Stack:       Node %s runtime (no pnpm, no git — push-based deploy), Caddy %s, PM2 %s\n' \
   "$(node -v)" "$(caddy version | awk '{print $1}')" "$(pm2 --version)"
 printf 'Caddy ACME:  email=%s (Let'\''s Encrypt автообновление, cron не нужен)\n' "$CADDY_ADMIN_EMAIL"
 printf 'Security:    ufw (%s/80/443), fail2ban (3 fails → 24h), unattended-upgrades (security only)\n' "$SSH_PORT"
-printf '\nGitHub Actions deploy key (public):\n'
-cat "/home/$DEPLOY_USER/.ssh/deploy_key.pub"
 printf '\nДальше: docs/server-add-site.md для подключения первого сайта.\n'
+printf 'Single-purpose deploy-ключ для GitHub Actions генерируется на Mac\n'
+printf 'разработчика (spec 01b-server-handoff), его публичная часть докладывается\n'
+printf 'в /home/%s/.ssh/authorized_keys через ssh-copy-id или вручную.\n' "$DEPLOY_USER"
