@@ -85,18 +85,42 @@ gh auth status              # gh-аккаунт совпадает с owner ре
 
 Если что-то не так (например, есть несохранённые изменения, или gh mismatch) — **остановись и спроси пользователя**, не продолжай миграцию вслепую.
 
-### 1.3. Backup tag
+### 1.3. Backup tag + страховка несохранённого
 
 **Обязательный шаг** перед любыми правками:
 
 ```bash
+# Если есть uncommitted-изменения — сначала сохранить их в stash, чтобы не потерять при reset
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  git stash push -u -m "pre-v3-migration-stash-$(date +%Y%m%d)"
+  echo "⚠ Uncommitted changes сохранены в stash. После миграции — git stash list / git stash pop, если нужны."
+fi
+
+# Тег + push — точка отката к до-миграционному состоянию
 git tag pre-v3-migration-$(date +%Y%m%d)
 git push origin pre-v3-migration-$(date +%Y%m%d)
 ```
 
-Это позволит вернуться к до-миграционному состоянию одной командой `git reset --hard pre-v3-migration-YYYYMMDD`.
+Это позволит вернуться к до-миграционному состоянию через safe revert (см. раздел «Rollback всей миграции» внизу), а stash восстанавливается через `git stash pop` если что-то из uncommitted понадобится.
 
-### 1.4. Проверить размер миграции
+### 1.4. (Опционально) Обновить `specs/` и `docs/` из bootstrap'а
+
+Если проект склонирован из v2.0.x или v2.1.x — в его `specs/*.md` и `docs/*.md` могут быть те же P0 баги, что лечились в Phase 0 ТЗ-1 (`localhost:4000`, `migration-map`, `compress-images`, schema A/B и т.д.). На initial setup это уже не влияет (он давно прошёл), но если планируешь дальше использовать `specs/13-extend-site.md` для правок — стоит подтянуть актуальные версии.
+
+```bash
+# Полная замена specs/ и docs/ из v3 bootstrap'а — НО исключая project-specific файлы
+rsync -av --exclude='spec.md' --exclude='content.md' --exclude='pages.md' --exclude='integrations.md' \
+  ~/ClaudeCode/web-dev-bootstrap/docs/ docs/
+
+rsync -av ~/ClaudeCode/web-dev-bootstrap/specs/ specs/
+# specs/ обычно не имеет project-specific файлов — там только setup-инструкции
+```
+
+**Альтернатива (более консервативная):** не трогать `specs/` и `docs/` вообще — они нужны только для initial setup, после миграции на v3 ты будешь работать через `specs/13-extend-site.md` (он сам по себе обновится после первого использования / при необходимости).
+
+Решает разработчик. По умолчанию — **пропустить** (специфики используются редко).
+
+### 1.5. Проверить размер миграции
 
 Грепом понять, что в проекте есть:
 
@@ -191,37 +215,14 @@ pnpm remove eslint eslint-config-next prettier prettier-plugin-tailwindcss \
 # 2. Установить Biome
 pnpm add -D --save-exact @biomejs/biome
 
-# 3. Инициализировать
-pnpm exec biome init
-```
+# 3. Скопировать канонический biome.json из bootstrap (single source of truth)
+cp ~/ClaudeCode/web-dev-bootstrap/biome.json.example ./biome.json
 
-Создать/перезаписать `biome.json`:
-```json
-{
-  "$schema": "https://biomejs.dev/schemas/2.x.x/schema.json",
-  "files": {
-    "ignore": ["node_modules", ".next", "out", "dist", "public/**/*.js", "content-collections/**"]
-  },
-  "linter": {
-    "enabled": true,
-    "rules": { "recommended": true, "a11y": { "recommended": true } }
-  },
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 100
-  },
-  "javascript": {
-    "formatter": { "quoteStyle": "single", "semicolons": "asNeeded" }
-  }
-}
-```
-
-Удалить файлы:
-```bash
+# 4. Удалить старые конфиги
 rm -f .eslintrc.* .prettierrc* .prettierignore
 ```
+
+> Канонический `biome.json.example` обновляется в каждом релизе bootstrap'а. Если хочется кастомизировать правила под проект — правь **проектный** `biome.json` после копирования, а не bootstrap-шаблон.
 
 Прогнать форматтер один раз по проекту (это будет большой коммит):
 ```bash
@@ -234,56 +235,25 @@ git commit -m "chore: migrate ESLint+Prettier to Biome"
 
 ### 2.4. Обновить `.claude/hooks/format.sh`
 
-Заменить вызов prettier на Biome:
+Канонический `format.sh` (Biome вместо Prettier) лежит в bootstrap'е. Скопировать поверх:
+
 ```bash
-#!/usr/bin/env bash
-file=$(jq -r '.tool_input.file_path // empty')
-[ -z "$file" ] && exit 0
-[ ! -f "$file" ] && exit 0
-
-case "$file" in
-  *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.json|*.md|*.mdx|*.css)
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-
-root="$(cd "$(dirname "$0")/../.." && pwd)"
-[ ! -f "$root/package.json" ] && exit 0
-
-cd "$root" || exit 0
-if [ -x "node_modules/.bin/biome" ]; then
-  node_modules/.bin/biome check --write --no-errors-on-unmatched "$file" 2>/dev/null || true
-fi
-
-exit 0
+cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/format.sh .claude/hooks/format.sh
+chmod +x .claude/hooks/format.sh
 ```
+
+Закоммитить отдельно: `chore: update format hook to use Biome`.
 
 ### 2.5. Расширить `.claude/hooks/guard-rm.sh`
 
-Покрыть `rm -rf .`, `rm -rf ./`, `git push -f` (короткая форма):
+В v3 `guard-rm.sh` покрывает дополнительные случаи: `rm -rf .`, `rm -rf ./`, `git push -f` (короткая форма), и др. Скопировать актуальный из bootstrap'а:
+
 ```bash
-#!/usr/bin/env bash
-cmd=$(jq -r '.tool_input.command // empty')
-[ -z "$cmd" ] && exit 0
-
-# Текущая папка, домашка, рут, glob
-if echo "$cmd" | grep -Eq 'rm[[:space:]]+(-[a-zA-Z]*[rR][a-zA-Z]*[[:space:]]+)?(-[a-zA-Z]*[fF][a-zA-Z]*[[:space:]]+)?(/|~|\$HOME|\*|\.|\.\/)([[:space:]]|$|/)'; then
-  echo "BLOCKED by guard-rm: refusing destructive rm on /, ~, \$HOME, ., ./, or glob." >&2
-  exit 2
-fi
-
-# git push --force OR -f
-if echo "$cmd" | grep -Eq '(^|[;&|][[:space:]]*)git[[:space:]]+push[[:space:]]+[^"'"'"']*(--force|[[:space:]]-f([[:space:]]|$))'; then
-  echo "BLOCKED by guard-rm: refusing git push --force/-f (use regular push)." >&2
-  exit 2
-fi
-
-exit 0
+cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/guard-rm.sh .claude/hooks/guard-rm.sh
+chmod +x .claude/hooks/guard-rm.sh
 ```
 
-Закоммитить вместе: `chore: harden guard-rm hook`.
+Закоммитить отдельно: `chore: harden guard-rm hook from bootstrap v3`.
 
 ---
 
@@ -413,9 +383,20 @@ rm app/api/lead/route.ts
    NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4...
    TURNSTILE_SECRET_KEY=0x4...
    ```
-4. В формах добавить компонент:
+4. **Найти все формы в проекте**, чтобы не пропустить ни одну:
+   ```bash
+   # Все компоненты с формой:
+   grep -rln 'useForm\|<form\|action=' app/ components/ 2>/dev/null
+
+   # Все клиентские компоненты с submit-handler'ами:
+   grep -rln '"use client"' app/ components/ 2>/dev/null | xargs grep -l 'onSubmit\|formAction' 2>/dev/null
+   ```
+   Типичные кандидаты: `ConsultationDialog.tsx`, `LeadForm.tsx`, `ContactForm.tsx`, footer-форма, форма квиза.
+
+5. В **каждой** найденной форме добавить компонент Turnstile:
    ```typescript
    import { Turnstile } from '@marsidev/react-turnstile'
+   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
 
    <Turnstile
      siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
@@ -423,9 +404,12 @@ rm app/api/lead/route.ts
      onSuccess={(token) => setTurnstileToken(token)}
    />
    <input type="hidden" name="turnstileToken" value={turnstileToken ?? ''} />
+   <button type="submit" disabled={!turnstileToken || isPending}>...</button>
    ```
 
-Закоммитить: `feat: add Cloudflare Turnstile to forms`.
+6. Проверить локально: открой каждую форму, дождись прогрузки виджета (~1 сек), submit — должен пройти. Если виджет не показывается — проверь, что `NEXT_PUBLIC_TURNSTILE_SITE_KEY` доступен на клиенте (`console.log` в dev).
+
+Закоммитить: `feat: add Cloudflare Turnstile to all forms`.
 
 ### 3.4. Content Collections (только если есть блог)
 
@@ -517,14 +501,28 @@ cp -r . releases/$(cat /tmp/current-sha)/ 2>/dev/null || true
 # Создать симлинк current на текущую версию
 ln -sfn releases/$(cat /tmp/current-sha) current
 
-# Перенаправить PM2 на current/
-pm2 stop {site}-prod
-pm2 delete {site}-prod
-pm2 start current/server.js --name {site}-prod --update-env
+# Перенаправить PM2 на current/ — ОБЯЗАТЕЛЬНО абсолютный путь
+# (PM2 запоминает target симлинка при start; без полного пути после ln -sfn будет запущен старый релиз)
+pm2 stop {site}-prod 2>/dev/null
+pm2 delete {site}-prod 2>/dev/null
+pm2 start /home/deploy/prod/{site}/current/server.js --name {site}-prod --update-env
 pm2 save
 ```
 
 ⚠️ Если `server.js` не существует (потому что `output: 'standalone'` ещё не включен в проекте на VPS) — пропусти, после первого нового деплоя через push-based он появится автоматически.
+
+⚠️ **Важно про PM2 + симлинки:** на некоторых версиях PM2 `pm2 start <path>` запоминает абсолютный путь файла на момент запуска. Если запустить `pm2 start /path/to/current/server.js`, а потом перенаправить симлинк `current → новый_релиз`, PM2 может продолжить запускать **старый** target. Поэтому стандартный workflow при переключении релиза:
+
+```bash
+ln -sfn /home/deploy/prod/{site}/releases/<new-sha> /home/deploy/prod/{site}/current
+pm2 reload {site}-prod --update-env
+# Если reload не подхватил новую версию (тестируй по странице или sha в HTML):
+pm2 delete {site}-prod
+pm2 start /home/deploy/prod/{site}/current/server.js --name {site}-prod --update-env
+pm2 save
+```
+
+В deploy-prod.yml workflow это уже учтено через `pm2 reload ... || pm2 start ...` fallback. Запиши в Известные грабли, что если симлинк переключился, а сайт всё ещё отдаёт старую версию — `pm2 delete && pm2 start` решает.
 
 ### 4.3. Удалить старый `deploy_key` с VPS
 
@@ -604,7 +602,45 @@ cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/resume.md .claude/commands/
 cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/catchup.md .claude/commands/
 ```
 
-### 5.2. Обновить `CLAUDE.md`
+### 5.2. Скопировать stop-reminder hook + обновить settings.json
+
+Stop-хук — мягкое напоминание про `/handoff`, если в текущей сессии были коммиты. Без него Claude после вашего ухода из чата ничего в память не запишет.
+
+```bash
+# Скопировать сам хук
+cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/stop-reminder.sh .claude/hooks/
+chmod +x .claude/hooks/stop-reminder.sh
+
+# Проверить, что session-start.sh пишет HEAD-sha в /tmp (нужно для stop-reminder):
+grep -q "session-start-sha" .claude/hooks/session-start.sh || \
+  cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/session-start.sh .claude/hooks/
+chmod +x .claude/hooks/session-start.sh
+```
+
+Затем зарегистрировать `Stop` event в `.claude/settings.json`. Открыть проектный `settings.json`, сравнить с `~/ClaudeCode/web-dev-bootstrap/.claude/settings.json`, добавить отсутствующий блок `Stop` в секцию `hooks`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [...],
+    "PreToolUse": [...],
+    "PostToolUse": [...],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/stop-reminder.sh" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+⚠️ Не перезаписывай весь `settings.json` целиком — у проекта могут быть свои hooks или permissions. Делай **диф-мерж**: сравни через `diff .claude/settings.json ~/ClaudeCode/web-dev-bootstrap/.claude/settings.json`, перенеси только отсутствующие блоки.
+
+Закоммитить: `chore: add stop-reminder hook + register Stop event`.
+
+### 5.3. Обновить `CLAUDE.md`
 
 Сравнить текущий `CLAUDE.md` с актуальным `~/ClaudeCode/web-dev-bootstrap/_BUILD/claude-md-template.md`. Добавить отсутствующие секции:
 - `## Multi-Claude protocol` (новая)
@@ -614,7 +650,7 @@ cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/catchup.md .claude/commands/
 
 Не трогать project-specific секции (`# Project: [Name]`, описание проекта, project-specific правила).
 
-### 5.3. Расширить `.claude/memory/project_state.md`
+### 5.4. Расширить `.claude/memory/project_state.md`
 
 Привести к новой структуре с разделом «Session log» (см. шаблон в `~/ClaudeCode/web-dev-bootstrap/.claude/memory/project_state.md` после ТЗ-1).
 
@@ -635,7 +671,36 @@ cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/catchup.md .claude/commands/
 **Resume hint:** Проект на v3.0. Дальнейшие правки — через спеку 13-extend-site как обычно.
 ```
 
-### 5.4. Обновить `.claude/memory/INDEX.md` (если есть)
+### 5.5. Записи в `decisions.md` и `references.md`
+
+**`decisions.md`** — почему вообще мигрировали (для будущей памяти, чтобы через год было понятно):
+
+```markdown
+### [YYYY-MM-DD] Migration to bootstrap v3.0
+
+**What:** Проект мигрирован с bootstrap v2.x на v3.0.
+- Tooling: pnpm + mise + Biome (заменили npm/nvm/ESLint+Prettier)
+- Code: Server Action `submitLead` + Cloudflare Turnstile (вместо `/api/lead` Route Handler без капчи)
+- Deploy: push-based через GitHub Actions runner + rsync standalone-артефакта + симлинк-релизы (вместо pull-based git+build на VPS)
+- Опционально: Caddy на VPS (если переезжали)
+
+**Why:** Унификация со стандартом v3.0. Push-based убирает риск OOM на VPS при билде, атомарный rollback через симлинк за миллисекунды без пересборки.
+
+**Alternatives considered:** Остаться на v2.x (rejected — рассинхрон с актуальным bootstrap'ом, сложнее поддерживать долгосрочно).
+```
+
+**`references.md`** — обновить новыми артефактами миграции:
+
+```markdown
+## Deployment (после v3 migration)
+
+- **GitHub Environments:** `production` (и `dev`, если используется) — Secrets живут там, не на repo-level.
+- **SSH-ключ деплоя:** `~/.ssh/{site}-deploy` (приватный) → загружен в `gh secret set SSH_PRIVATE_KEY --env production`. Публичная часть — в `~/.ssh/authorized_keys` пользователя `deploy` на VPS.
+- **Cloudflare Turnstile:** site-key + secret-key — в Cloudflare Dashboard → Turnstile → {site-name}. Site-key публичный (`NEXT_PUBLIC_TURNSTILE_SITE_KEY`), secret-key только в `PROD_ENV_FILE` Environment Secret.
+- **Pre-migration backup:** тег `pre-v3-migration-YYYYMMDD` (на origin).
+```
+
+### 5.6. Обновить `.claude/memory/INDEX.md` (если есть)
 
 Сверить с актуальным шаблоном из bootstrap. Обычно меняется мало, но проверить полезно.
 
@@ -694,34 +759,101 @@ cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/catchup.md .claude/commands/
 - `git tag v3-migrated-$(date +%Y%m%d)` создан и запушен
 - В `.claude/memory/decisions.md` запись о миграции с **Why:** (для исторической памяти)
 
+### Грепы для самопроверки (запустить из корня проекта)
+
+```bash
+# Не должно быть упоминаний npm-команд (кроме package-lock и старых backup'ов):
+grep -rn "npm run\|npm install\|npm ci" --include="*.md" --include="*.json" --include="*.yml" \
+  | grep -v "package-lock\|node_modules\|/_BUILD/v3/\|releases/" \
+  | head -10                              # должно быть пусто или только в changelog'ах
+
+# Не должно быть Route Handler endpoint'а:
+test -f app/api/lead/route.ts && echo "✗ /api/lead route still exists" || echo "✓ /api/lead route removed"
+
+# Server Action на месте:
+test -f app/actions/submit-lead.ts && echo "✓ submitLead action exists" || echo "✗ MISSING"
+
+# Biome конфигурация на месте:
+test -f biome.json && echo "✓ biome.json exists" || echo "✗ MISSING"
+
+# pnpm lock на месте, npm lock удалён:
+test -f pnpm-lock.yaml && test ! -f package-lock.json && echo "✓ pnpm migration done" || echo "✗ check lockfiles"
+
+# mise:
+test -f .tool-versions && echo "✓ .tool-versions exists" || echo "✗ MISSING"
+
+# Slash-команды:
+for cmd in handoff resume catchup; do
+  test -f .claude/commands/$cmd.md && echo "✓ /$cmd" || echo "✗ MISSING /$cmd"
+done
+
+# Stop hook:
+test -f .claude/hooks/stop-reminder.sh && \
+  grep -q '"Stop"' .claude/settings.json && \
+  echo "✓ Stop hook registered" || echo "✗ Stop hook missing or not registered"
+
+# Multi-Claude protocol в CLAUDE.md:
+grep -q "Multi-Claude protocol" CLAUDE.md && echo "✓ Multi-Claude protocol section" || echo "✗ MISSING"
+```
+
+Если хоть одно `✗` — миграция не закрыта, доделай соответствующий шаг.
+
 ---
 
 ## Rollback всей миграции
 
 Если миграция пошла катастрофически и нужно откатить весь проект:
 
+### Безопасный путь: revert вместо force-push
+
+`git push -f origin main` — **не используй**. Force-push в `main` блокируется хуком `guard-rm.sh` (расширенным в § 2.5), теряет историю, ломает GitHub Actions runs других коллабораторов. Правильный rollback через revert-серию:
+
 ```bash
 # 1. На Mac:
 git fetch origin
-git checkout pre-v3-migration-YYYYMMDD     # тег из шага 1.3
-git push -f origin main                    # ОСТОРОЖНО: только если уверен
+git checkout main
+git pull origin main
 
-# 2. На VPS — вернуть старую версию через симлинк (если успел переключить)
+# Создать revert-серию: обнулить все коммиты после pre-v3-migration-tag
+# Это создаст новые коммиты, не переписывая историю.
+git revert --no-edit pre-v3-migration-YYYYMMDD..HEAD
+# Если конфликты — разрешить руками, потом git revert --continue
+
+# Запушить (обычным push, не force):
+git push origin main
+```
+
+**Альтернатива через PR** (ещё безопаснее, требует merge через UI):
+```bash
+git checkout -b chore/rollback-v3-migration
+git revert --no-edit pre-v3-migration-YYYYMMDD..HEAD
+git push -u origin chore/rollback-v3-migration
+gh pr create --title "Rollback v3 migration" --body "Revert v3 migration commits — see decisions.md"
+# Merge через GitHub UI — Actions передеплоит pre-migration версию автоматически
+```
+
+### Прод на VPS
+
+```bash
+# Если на VPS уже успел переключить симлинк current на v3-релиз:
 ssh deploy@{vps-ip}
 cd ~/prod/{site}
-ls -1tr releases/    # найти sha до миграции (если был сохранён в releases/)
-ln -sfn releases/<old-sha> current
+ls -1tr releases/    # найти sha до миграции
+ln -sfn /home/deploy/prod/{site}/releases/<old-sha> current
 pm2 reload {site}-prod --update-env
+# Если reload не подхватил — pm2 delete && pm2 start (см. грабли про PM2-симлинк)
 
-# Если releases/ ещё не создан — вручную восстановить из бэкапа или git checkout старого коммита:
-git fetch origin
-git checkout pre-v3-migration-YYYYMMDD
-npm install                                # ВНИМАНИЕ: npm, не pnpm — старая версия
-npm run build
-pm2 restart {site}-prod --update-env
-
-# 3. На GitHub — вернуть старые секреты (DEPLOY_SSH_KEY и т.д.)
+# Если releases/ ещё не создан (миграция упала в Этапе 4.2 до создания) — VPS не тронут,
+# просто переоткатил Actions через revert (выше) — следующий push передеплоит старую версию.
 ```
+
+### GitHub Secrets
+
+После revert'а workflow всё ещё ожидает новые Environment Secrets (`SSH_PRIVATE_KEY` в `production`). Выбор:
+- **Оставить новые секреты** — workflow работает, deploy продолжает push-based
+- **Полностью откатить** — вернуть старый repo-level `DEPLOY_SSH_KEY`, удалить Environment `production`, убрать в .github/workflows старый `deploy-prod.yml` (через тот же revert)
+
+Чаще всего достаточно **оставить новые секреты** — они нейтральны, проект просто использует старый workflow.
 
 После отката — сообщи ошибку, разберёмся в чём конкретно было дело.
 
@@ -740,6 +872,25 @@ pm2 restart {site}-prod --update-env
 
 ### «Симлинк current не переключается»
 - Проверь права: `ls -la /home/deploy/prod/{site}/`. Симлинк должен быть owned `deploy:deploy`. Если nobody — `chown -h deploy:deploy current`.
+
+### «Симлинк переключился, но сайт всё ещё на старой версии»
+- PM2 запоминает абсолютный путь `server.js` при старте. После `ln -sfn` нужен `pm2 reload`. Если `reload` не помог:
+  ```bash
+  pm2 delete {site}-prod
+  pm2 start /home/deploy/prod/{site}/current/server.js --name {site}-prod --update-env
+  pm2 save
+  ```
+
+### «Action упал на Setup SSH с пустым ключом»
+- Секрет лежит в repo-level Secrets, а не в Environment `production`. В workflow прописано `environment: production`, поэтому `${{ secrets.SSH_PRIVATE_KEY }}` ищется именно в этом environment.
+- Фикс: `gh secret set SSH_PRIVATE_KEY --env production --repo {owner}/{site} < ~/.ssh/{site}-deploy`. Тот же fix для `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `PROD_ENV_FILE`.
+
+### «Caddy не получает сертификат после переключения с nginx»
+- Возможные причины:
+  1. A-запись домена кэширована/смотрит на старый IP. Проверка: `dig +short {domain}` с разных машин — должно везде вернуть IP VPS.
+  2. 80-порт занят nginx-residual (nginx не до конца остановился). `sudo lsof -i :80` — должен показывать `caddy`, не `nginx`.
+  3. Cloudflare proxy включён (оранжевое облачко) — выключи на время выпуска (серое облачко = DNS only), потом верни.
+- Логи: `sudo journalctl -u caddy --since "10 min ago" | grep -iE "obtained|error|challenge"`.
 
 ### «PSI mobile упал после миграции на 5-10 баллов»
 - Проверь, что `output: 'standalone'` не убрал какие-то custom-файлы из билда (например, public файлы, которые должны были скопироваться). Сравни `.next/static/` до и после.
