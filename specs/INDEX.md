@@ -27,7 +27,7 @@ Before coding:
 | 06 | `06-subpages-rollout.md` | Все остальные страницы услуг по `docs/pages.md` (HIGH priority) | 05 | все услуги на dev/prod |
 | 07 | `07-blog-optional.md` | MDX-блог с listing/post/sitemap (если в `docs/pages.md` есть блог) | 02 (минимум), 06 (рекомендуется) | блог на dev |
 | 08 | `08-seo-schema.md` | robots.ts, sitemap.ts, Schema.org, редиректы, проверка в валидаторах | 06 | весь сайт SEO-готов |
-| 09 | `09-forms-crm.md` | `/api/lead`, CRM-интеграция, fallback в JSON, ConsultationDialog, cookie-баннер, согласие на ПДн | 06 | формы рабочие |
+| 09 | `09-forms-crm.md` | Server Action `submitLead`, CRM-интеграция, fallback в JSON, ConsultationDialog, cookie-баннер, согласие на ПДн | 06 | формы рабочие |
 | 10 | `10-analytics.md` | Я.Метрика + GA + GSC + Я.Вебмастер + цели | 09 (для конверсий) | счётчики собирают |
 | 11 | `11-performance.md` | Bundle analyzer, Server Components, dynamic imports, изображения, `loading.tsx` ревизия, Lighthouse 90+ | все основные | оптимизированный prod |
 | 12 | `12-handoff.md` | Передача доступов, `HANDOFF.md` с runbook, тег v1.0 | 11 | релизная версия |

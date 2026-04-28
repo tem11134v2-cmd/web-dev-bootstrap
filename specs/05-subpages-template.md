@@ -116,6 +116,20 @@ Server Component по умолчанию (нулевой клиентский JS
 - **Ask first:** если страница требует уникальных секций, не подходящих под шаблон — обсудить, делаем как кастомную или расширяем шаблон
 - **Never:** добавлять `"use client"` в page.tsx (только если страница реально интерактивная), хардкодить JSON-LD в page.tsx (только через генератор)
 
+## Опционально: `use cache` для тяжёлых server-компонентов
+
+Если секция шаблона делает дорогой парсинг или server-fetch на каждый рендер (например, динамическая таблица сравнения с расчётами по 100+ позициям) — можно обернуть её в `'use cache'`:
+
+```typescript
+async function ComparisonSection({ slug }: { slug: string }) {
+  'use cache'
+  const rows = await loadComparison(slug)
+  return <Comparison rows={rows} />
+}
+```
+
+Не нужно для статичных секций (Hero, Steps, FAQ) — они и так server-rendered один раз на билде. Подробнее когда применять — `docs/performance.md` § 7 «Next.js: директива `use cache`».
+
 ## Done when
 
 - `ServicePageTemplate` (server) и `ServicePageForms` (client) созданы

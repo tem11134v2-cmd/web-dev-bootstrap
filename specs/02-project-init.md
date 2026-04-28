@@ -51,8 +51,12 @@
        minimumCacheTTL: 60 * 60 * 24 * 365,
      },
      reactStrictMode: true,
+     experimental: {
+       ppr: 'incremental', // Partial Prerendering — опт-ин per-route через `export const experimental_ppr = true`
+     },
    }
    ```
+   `experimental.ppr: 'incremental'` оставляет дефолтный SSG для всех роутов и активирует PPR только там, где явно прописано `experimental_ppr = true` в page.tsx. Подробнее когда применять — `docs/architecture.md` § «Partial Prerendering». Если PPR в проекте не пригодится — флаг можно убрать без последствий.
 7. Настроить `package.json` scripts (dev на Mac и prod на VPS используют один порт 3000; на VPS фактический порт передаётся через переменную `PORT` при `pm2 start`):
    ```json
    "scripts": {

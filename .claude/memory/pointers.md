@@ -41,7 +41,9 @@ type: reference
   контекст `lib/consultation-context.tsx`. Открыть из любого места:
   `useConsultationDialog().setOpen(true)`.
 - **Inline-форма лида:** `components/forms/LeadForm.tsx` — для CTA Final.
-- **API endpoint:** `app/api/lead/route.ts` — единая точка приёма всех форм.
+- **Server Action:** `app/actions/submit-lead.ts` — единая точка приёма всех форм
+  (формы вызывают через `useActionState` + `<form action={formAction}>`).
+  Endpoint `/api/lead` **не существует** (мигрировали в Фазе 4 v3.0-next16).
 
 ## SEO
 
