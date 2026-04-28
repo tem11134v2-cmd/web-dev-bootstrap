@@ -36,9 +36,31 @@ ssh deploy@{ip} 'mkdir -p ~/prod/{site}/releases'
 ssh deploy@{ip} 'mkdir -p ~/dev/{site}/releases'
 ```
 
-Папку `~/prod/{site}/current` создавать не нужно — workflow поставит её симлинком после первого деплоя (`ln -sfn ~/prod/{site}/releases/<sha> ~/prod/{site}/current`). Подробнее про структуру — `docs/deploy.md` § «Структура релизов на VPS».
+### Структура папок сайта на VPS
 
-PM2-процесс тоже стартует workflow (`pm2 start ~/prod/{site}/current/server.js --name {site}-prod`) — руками здесь не запускаем.
+После первого успешного деплоя на VPS будет:
+
+```
+/home/deploy/prod/{site}/
+├── releases/
+│   ├── 7f3a9c2…/         ← старый релиз (sha коммита)
+│   ├── b1e8d4f…/         ← предыдущий
+│   └── c5d2a91…/         ← новый, активный
+│       ├── server.js     ← entry point standalone-сборки
+│       ├── .next/
+│       │   └── static/
+│       ├── public/
+│       └── .env          ← пушит workflow из PROD_ENV_FILE secret
+└── current → releases/c5d2a91…/
+```
+
+Симлинк `current` указывает на активный релиз. Switch версии (новый деплой / откат) = атомарный `ln -sfn releases/<new-sha> current`. PM2 запущен на `current/server.js` — после смены симлинка `pm2 reload` подхватывает новый код, просадки даунтайма нет.
+
+**Изначально** (до первого workflow) в `~/prod/{site}/` есть только пустая папка `releases/`; `current` ещё не создан. Первый успешный workflow поставит симлинк и запустит `pm2 start current/server.js`. Дальше — только `pm2 reload`.
+
+Старые релизы чистит сам workflow (оставляет последние 5 для prod, 3 для dev) — на диске не накапливаются.
+
+PM2-процесс стартует workflow — руками здесь не запускаем.
 
 ### SSH-ключ Actions → VPS
 

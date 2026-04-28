@@ -28,6 +28,31 @@
                                    └─────────────────────────┘
 ```
 
+## Структура релизов на VPS
+
+Push-based deploy кладёт каждый билд в `releases/<sha>/` и переключает симлинк `current` атомарно. Это даёт мгновенный rollback (`ln -sfn` обратно) и нулевой даунтайм при `pm2 reload`.
+
+```
+/home/deploy/prod/{site}/
+├── releases/
+│   ├── 7f3a9c2…/         старый релиз (sha коммита из github.sha)
+│   ├── b1e8d4f…/         предыдущий
+│   └── c5d2a91…/         новый, активный
+│       ├── server.js     entry point standalone-сборки Next.js
+│       ├── .next/
+│       │   └── static/   (положен runner-ом рядом со standalone)
+│       ├── public/       (положен runner-ом рядом со standalone)
+│       └── .env          (записан workflow из PROD_ENV_FILE secret)
+└── current → releases/c5d2a91…/
+```
+
+- **Switch на новый релиз:** `ln -sfn releases/<new-sha> current && pm2 reload {site}-prod`. Атомарно, без перезапуска процесса с холодного старта.
+- **Rollback:** `scripts/rollback.sh` находит предыдущий sha, переключает симлинк обратно, делает `pm2 reload`. Без пересборки — миллисекунды.
+- **Cleanup:** workflow держит последние 5 релизов prod (3 для dev) — `ls -1tr releases | head -n -5 | xargs rm -rf`.
+- **Первый деплой:** до первого workflow в `~/prod/{site}/` есть только пустая папка `releases/`; `current` создаётся первым же успешным запуском, дальше PM2 живёт на `current/server.js`.
+
+Подробности по созданию папки и доступам — `docs/server-add-site.md`.
+
 ## Собственность
 
 - **Mac и локальная папка** — у разработчика.
