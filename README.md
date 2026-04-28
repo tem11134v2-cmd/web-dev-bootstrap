@@ -1,4 +1,4 @@
-# web-dev-bootstrap v2.2
+# web-dev-bootstrap v2.2.2
 
 Промпт-пакет для Claude Code Desktop, который превращает его в дисциплинированного
 frontend-разработчика конверсионных сайтов на Next.js. Не зависимость, не
@@ -35,7 +35,7 @@ specs/                     — последовательность задач
   templates/                 → spec-template, page-spec-template
   examples/                  → живые образцы зрелых спек (референс формата)
 .claude/memory/            — шаблоны проектной памяти (INDEX + 6 файлов)
-_BUILD/                    — служебное: changelog, migration-map, claude-md-template
+_BUILD/                    — служебное: changelog, claude-md-template, HOW-TO-START
 ```
 
 ## Как использовать
@@ -72,8 +72,7 @@ _BUILD/                    — служебное: changelog, migration-map, cla
 - **[CLAUDE.md](CLAUDE.md)** — правила проекта + указатели на KB и спеки
 - **[docs/INDEX.md](docs/INDEX.md)** — карта Knowledge Base
 - **[specs/INDEX.md](specs/INDEX.md)** — последовательность спек + граф
-- **[_BUILD/changelog.md](_BUILD/changelog.md)** — миграция v1.7 → v2.0
-- **[_BUILD/migration-map.md](_BUILD/migration-map.md)** — детальная карта переезда
+- **[_BUILD/changelog.md](_BUILD/changelog.md)** — история версий (v2.0 → v2.2.x)
 
 ## Философия
 
@@ -89,10 +88,11 @@ _BUILD/                    — служебное: changelog, migration-map, cla
 
 ## Версия
 
-v2.1.0 (2026-04-24). Переход с серверной разработки (Claude на VPS через SSH) на
-локальную десктопную: Mac → GitHub → VPS. Убраны схемы A/B, остался один
-консистентный воркфлоу. Серверные чек-листы выделены в `docs/server-*.md`. См.
-`_BUILD/changelog.md` для полной истории.
+v2.2.2 (2026-04-28). P0 hotfix bundle поверх v2.2.1: убраны устаревшие упоминания
+(compress-images, localhost:4000, схемы A/B, migration-map), синхронизированы версии,
+переименован `.claude/hooks.json` → `settings.json` в доках. Архитектура без изменений —
+большой рефакторинг под v3.0 идёт отдельным треком (см. `_BUILD/v3/`). Полная история —
+`_BUILD/changelog.md`.
 
 ## Лицензия
 

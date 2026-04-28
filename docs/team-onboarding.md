@@ -38,7 +38,7 @@ npm install
 
 ```bash
 npm run dev
-# → http://localhost:4000
+# → http://localhost:3000
 ```
 
 Без `.env.production` формы пишут лиды в `data/leads.json` (fallback) — это нормально для локальной разработки.

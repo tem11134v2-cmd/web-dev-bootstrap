@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.2.2 — 2026-04-28 · P0 hotfix bundle
+
+Фаза 0 рефакторинга `_BUILD/v3/01-bootstrap-refactor.md`. 12 точечных правок поверх v2.2.1, без архитектурных изменений — закрываем накопившиеся противоречия и битые ссылки перед переходом на v3.0.
+
+- **P0-1 (compress-images.mjs).** Скрипт никогда не существовал. Убрано из `package.json scripts`, описаний папок, `npm run build`, упоминаний в перформанс-доках. `next/image` сам ресайзит и оптимизирует на лету (sharp подключается как `optionalDependency` Next.js 15+).
+- **P0-2 (localhost:4000 → :3000).** Три места в `specs/02`, `specs/03`, `docs/team-onboarding.md` отстали от единого порта 3000. Легитимный `:4010` в `docs/deploy.md` (dev-поддомен на VPS) не трогали.
+- **P0-3 (синхронизация версий).** `README.md` H1 = `v2.2.2`, блок «Версия» переписан под актуальную дату. `_BUILD/claude-md-template.md` — дефолт стека `v2.2.2`. В meta-шапке `CLAUDE.md` — история версий «v2.0 → v2.2.x», пример тегов «v2.2.3 / v2.3.0».
+- **P0-4 (`_BUILD/migration-map.md` ссылки).** Файла нет и не будет (содержание в changelog). Убраны упоминания из `README.md` ×2, `specs/00-brief.md`, `_BUILD/changelog.md`.
+- **P0-5 (схемы A/B деплоя).** Остатки в `specs/13-extend-site.md` и `specs/06-subpages-rollout.md` приведены к единому push-flow `git push origin dev → PR в main → автодеплой через Actions` (схему B убрали в v2.1, но местами осталась).
+- **P0-6 (ConsultationDialog spec).** В `specs/02-project-init.md:71` указано, что Provider добавляется в спеке 09 — на самом деле в 04 (вместе с первой формой на главной).
+- **P0-7 (footer ссылки на /privacy /terms).** В спеке 03 убрали эти ссылки из Footer (страниц ещё нет — будут битые). Добавили шаг 12 в `specs/09-forms-crm.md` — обновить Footer.tsx после создания юр-страниц.
+- **P0-8 (`hooks.json` → `settings.json`).** В `docs/workflow.md` исправлено название файла с хуками — реально это `.claude/settings.json`.
+- **N1 (`scripts/README.md`).** Добавлены строки про `rollback.sh` и `sync-env.sh` в таблицу скриптов (появились в v2.2, но в README не попали).
+- **N2 (Zod → Valibot совет).** Решение проекта: Zod остаётся (на лендинге ~100 KB незаметны, экосистема RHF + Zod зрелая). Совет «замени на valibot» убран из `specs/11`, `docs/performance.md`, `docs/stack.md`. В таблицу красных флагов вместо Zod — `react-icons` целиком (где tree-shake реально критичен).
+- **N3 (`IDEAS.md`).** Файла нет, упоминание из meta-шапки `CLAUDE.md` убрано.
+- **N4.** Эта запись.
+
+12 атомарных коммитов в ветке `fix/v2.2.2-p0-bundle`. Архитектура без изменений — большой рефакторинг (Caddy / pnpm / Biome / push-deploy / Next 16 паттерны / multi-Claude handoff) идёт отдельным треком, см. `_BUILD/v3/01-bootstrap-refactor.md`.
+
 ## v2.2.1 — 2026-04-27 · HOW-TO-START clarity pass
 
 Доводка инструкции после первой эксплуатации — стало понятнее для тех, кто видит её впервые (а не только для меня).
@@ -113,7 +132,7 @@
 
 ### Что переехало v1.7 → v2.0
 
-Детальная карта — в `_BUILD/migration-map.md`. Коротко:
+Коротко:
 
 | Модуль v1.7 | Стало в v2.0 |
 |---|---|

@@ -37,9 +37,9 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 ### 2. Bundle: убрать раздутые зависимости
 
 4. По красным флагам из docs/performance.md:
-   - Если есть `zod` v4 — заменить на `valibot` (1-3 KB вместо ~100 KB)
    - Если есть `moment` — заменить на `date-fns` или `dayjs`
    - Если есть полный `lodash` — `lodash-es` с именованными импортами
+   - Если есть `react-icons` целиком — заменить на нужный сабсет (`react-icons/lu` и т.п.)
 5. Проверить bundle ещё раз — что снизилось
 
 ### 3. Server Components (если ещё не везде)
@@ -63,7 +63,7 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 
 ### 5. Изображения
 
-11. Все растровые изображения в `public/` прогнать через sharp (JPEG quality 75, PNG level 9, удалить EXIF):
+11. `next/image` берёт на себя ресайз и WebP/AVIF на лету (sharp подключается как `optionalDependency` Next.js 15+ — устанавливается автоматически). К `npm run build` пост-процессинг изображений **не подключаем**. Если есть тяжёлая статика в `public/` (фоновые JPEG/PNG, перенесённые со старого сайта) — однократно прогнать вручную:
     ```bash
     npx sharp-cli --input "public/**/*.{jpg,jpeg,png}" --output public/ --mozjpeg --quality 75
     ```

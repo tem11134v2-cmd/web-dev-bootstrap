@@ -40,10 +40,10 @@ Core Web Vitals в зелёной зоне: **LCP < 2.5s, CLS < 0.1, INP < 200ms
 
 | Вместо | Используй | Причина |
 |---|---|---|
-| `zod` v4 (~100 KB) | `valibot` (1–3 KB) | Tree-shake работает (функциональный API) |
 | `moment` (~300 KB) | `date-fns`, `dayjs` | Модульный |
 | `import _ from "lodash"` | `lodash-es` именованные импорты | Tree-shake |
 | Полный `@mui/material` | Отдельные компоненты | По одному, не всё |
+| `react-icons` целиком | `react-icons/lu` (Lucide) или нужный сабсет | Tree-shake срабатывает только на сабсетах |
 
 > Tree-shaking **не работает** для методов на объектах (`z.string().email()`) — вся либа тянется целиком. Симптом: после удаления одного импорта Zod бандл не уменьшился.
 
@@ -77,7 +77,7 @@ gzip_types text/plain text/css application/json application/javascript text/xml 
 gzip_static on;  # отдаёт предсжатые .gz
 ```
 
-`gzip_static on` + постбилд `.gz` (через `npm run compress` шаг) = zero-runtime-cost compression.
+`gzip on` обрабатывает динамические ответы (HTML, JSON). `gzip_static on` отдаёт предсжатые `.gz`, если они лежат рядом с файлом — но никакого постбилд-шага сжатия в шаблоне нет, эта настройка просто включает поддержку, если позже понадобится.
 
 **Brotli** даёт +10–15% к gzip, но требует PPA / compile-from-source. На общих VPS — gzip достаточен. Не сжимать: WebP, AVIF, JPEG, PNG, woff2 (уже сжаты).
 
@@ -126,9 +126,17 @@ const nextConfig = {
 };
 ```
 
-## 10. Сжатие изображений при сборке
+## 10. Оптимизация изображений
 
-Скрипт `scripts/compress-images.mjs` через sharp: JPEG `mozjpeg quality 75`, PNG `compressionLevel 9`, удалить EXIF. Запускается из `npm run build` (см. `docs/stack.md`).
+`next/image` сам ресайзит и переводит в WebP/AVIF на лету — sharp подключается как `optionalDependency` Next.js 15+ и активируется автоматически. Постбилд-шага сжатия в шаблоне нет.
+
+Если нужно один раз пройтись по тяжёлой статике в `public/` (например, после переноса со старого сайта) — вручную:
+
+```bash
+npx sharp-cli --input "public/**/*.{jpg,jpeg,png}" --output public/ --mozjpeg --quality 75
+```
+
+К `npm run build` это не подключаем — пусть остаётся одноразовой операцией.
 
 ## 11. Accessibility (a11y)
 
