@@ -35,7 +35,7 @@ specs/                     — последовательность задач
   templates/                 → spec-template, page-spec-template
   examples/                  → живые образцы зрелых спек (референс формата)
 .claude/memory/            — шаблоны проектной памяти (INDEX + 6 файлов)
-_BUILD/                    — служебное: changelog, migration-map, claude-md-template
+_BUILD/                    — служебное: changelog, claude-md-template, HOW-TO-START
 ```
 
 ## Как использовать
@@ -72,8 +72,7 @@ _BUILD/                    — служебное: changelog, migration-map, cla
 - **[CLAUDE.md](CLAUDE.md)** — правила проекта + указатели на KB и спеки
 - **[docs/INDEX.md](docs/INDEX.md)** — карта Knowledge Base
 - **[specs/INDEX.md](specs/INDEX.md)** — последовательность спек + граф
-- **[_BUILD/changelog.md](_BUILD/changelog.md)** — миграция v1.7 → v2.0
-- **[_BUILD/migration-map.md](_BUILD/migration-map.md)** — детальная карта переезда
+- **[_BUILD/changelog.md](_BUILD/changelog.md)** — история версий (v2.0 → v2.2.x)
 
 ## Философия
 

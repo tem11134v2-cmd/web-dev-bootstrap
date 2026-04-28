@@ -3,7 +3,6 @@
 ## KB files to read first
 
 - `.claude/memory/INDEX.md`
-- `_BUILD/migration-map.md` (только если bootstrap ещё не упакован)
 
 ## Goal
 
