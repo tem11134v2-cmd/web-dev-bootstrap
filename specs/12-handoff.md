@@ -109,7 +109,7 @@ sudo systemctl restart caddy   # только если status показывае
 
    ssh deploy@{ip}
    cd ~/prod/{site}
-   git pull origin main && npm ci && npm run build && pm2 restart {site}-prod
+   git pull origin main && pnpm install --frozen-lockfile && pnpm build && pm2 restart {site}-prod
 
 ### Билд падает с OOM (out of memory)
 
@@ -123,7 +123,7 @@ ssh deploy@{ip}
 cd ~/prod/{site}
 git log --oneline -10                 # найти последний рабочий коммит
 git reset --hard {commit-hash}
-npm ci && npm run build && pm2 restart {site}-prod
+pnpm install --frozen-lockfile && pnpm build && pm2 restart {site}-prod
 
 ### Лиды не доходят в CRM
 

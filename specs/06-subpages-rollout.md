@@ -75,7 +75,7 @@
 
 ### 6. Проверка
 
-14. `npm run build` — должен пройти, все ссылки валидны
+14. `pnpm build` — должен пройти, все ссылки валидны
 15. Прогнать по чек-листу docs/seo.md → «Чек-лист SEO для разработчика» для 2-3 рандомных страниц
 16. Проверить sitemap.xml на localhost — все страницы есть
 17. Деплой: `git push origin dev` → PR в `main`
@@ -93,7 +93,7 @@
 - Перелинковка работает (breadcrumbs, related, внутренние ссылки)
 - Header/Footer навигация обновлена
 - `pages.md` обновлён (статусы)
-- `npm run build` проходит, нет 404 в RSC-prefetch (см. console)
+- `pnpm build` проходит, нет 404 в RSC-prefetch (см. console)
 - Деплой выполнен
 
 ## Memory updates

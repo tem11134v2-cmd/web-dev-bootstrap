@@ -1,4 +1,4 @@
-# web-dev-bootstrap v2.2.2
+# web-dev-bootstrap v2.3-dx
 
 Промпт-пакет для Claude Code Desktop, который превращает его в дисциплинированного
 frontend-разработчика конверсионных сайтов на Next.js. Не зависимость, не
@@ -40,8 +40,7 @@ _BUILD/                    — служебное: changelog, claude-md-template
 
 ## Как использовать
 
-1. **Разовая подготовка Mac (первый раз в жизни):** установи `node` 22+, `git`,
-   `gh`, залогинься в `gh auth login`, прокинь SSH-ключ на GitHub.
+1. **Разовая подготовка Mac (первый раз в жизни):** установи `mise` (`brew install gh mise`), активируй в zshrc, потом `mise use --global node@22 pnpm@latest`, залогинься в `gh auth login`, прокинь SSH-ключ на GitHub. Полный пошаговый чек-лист — `_BUILD/HOW-TO-START.md`.
 2. **Разовая подготовка VPS (первый раз для этого сервера):** пройди
    `docs/server-manual-setup.md` — создай пользователя, поставь стек, swap.
 3. **Старт нового сайта** — пройди `specs/00.5-new-project-init.md`:
@@ -63,7 +62,7 @@ _BUILD/                    — служебное: changelog, claude-md-template
 ## Требования
 
 - Claude Code Desktop (macOS/Windows)
-- Node.js 22+ на Mac и VPS
+- Node.js 22+ + pnpm (через `mise` на Mac, через `corepack` на VPS — обе ставятся в bootstrap'ах)
 - `gh` CLI на Mac (для `gh repo create --template` и авторизации)
 - VPS с Ubuntu 22.04+ для деплоя (см. `docs/server-manual-setup.md`)
 
@@ -72,7 +71,7 @@ _BUILD/                    — служебное: changelog, claude-md-template
 - **[CLAUDE.md](CLAUDE.md)** — правила проекта + указатели на KB и спеки
 - **[docs/INDEX.md](docs/INDEX.md)** — карта Knowledge Base
 - **[specs/INDEX.md](specs/INDEX.md)** — последовательность спек + граф
-- **[_BUILD/changelog.md](_BUILD/changelog.md)** — история версий (v2.0 → v2.2.x)
+- **[_BUILD/changelog.md](_BUILD/changelog.md)** — история версий (v2.0 → v2.3.x)
 
 ## Философия
 
@@ -88,11 +87,13 @@ _BUILD/                    — служебное: changelog, claude-md-template
 
 ## Версия
 
-v2.2.2 (2026-04-28). P0 hotfix bundle поверх v2.2.1: убраны устаревшие упоминания
-(compress-images, localhost:4000, схемы A/B, migration-map), синхронизированы версии,
-переименован `.claude/hooks.json` → `settings.json` в доках. Архитектура без изменений —
-большой рефакторинг под v3.0 идёт отдельным треком (см. `_BUILD/v3/`). Полная история —
-`_BUILD/changelog.md`.
+v2.3-dx (2026-04-28). DX win поверх v2.3-caddy: ESLint+Prettier → **Biome** (один бинарник,
+~10× быстрее, встроенная сортировка Tailwind-классов), npm → **pnpm** (через corepack/mise),
+nvm → **mise** (единый менеджер версий, читает `.tool-versions`), добавлен **schema-dts**
+для типобезопасных JSON-LD генераторов в `lib/schema.ts`. Все изменения локальны на Mac
+разработчика — рантайм сайтов не трогали. v2.3-caddy ранее заменил nginx+certbot на Caddy
+(встроенный ACME). Большой рефакторинг под v3.0 идёт по плану в `_BUILD/v3/01-bootstrap-refactor.md`.
+Полная история — `_BUILD/changelog.md`.
 
 ## Лицензия
 

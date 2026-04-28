@@ -33,7 +33,7 @@
 Сгенерируй файл по шаблону из `docs/deploy.md`. Ключевые точки:
 - Trigger: `push` → `branches: [main]`.
 - Использует секреты `DEPLOY_SSH_KEY`, `SERVER_IP` и переменную `SITE_NAME`.
-- Шаги: `webfactory/ssh-agent` → SSH в `~/prod/{site}` → `git pull` → `npm ci` → `npm run build` → `pm2 restart {site}-prod`.
+- Шаги: `webfactory/ssh-agent` → SSH в `~/prod/{site}` → `git pull` → `pnpm install --frozen-lockfile` → `pnpm build` → `pm2 restart {site}-prod`.
 
 ### 2. `.github/workflows/deploy-dev.yml` (если нужен preview)
 

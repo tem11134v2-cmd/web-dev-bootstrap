@@ -29,11 +29,15 @@
 
 ### 2. Schema.org разметка — расширение
 
-3. Дополнить `lib/schema.ts` функциями:
-   - `generateOrganizationSchema()` — для footer/layout
-   - `generateLocalBusinessSchema()` (если у заказчика физический офис)
-   - `generateBreadcrumbSchema(slug)` — уже есть, проверить
-   - `generateArticleSchema(post)` — для блога
+3. Дополнить `lib/schema.ts` типизированными функциями через `schema-dts` (тот же подход, что в спеке 05):
+   ```typescript
+   import type { WithContext, Organization, LocalBusiness, Article } from 'schema-dts'
+
+   export function generateOrganizationSchema(): WithContext<Organization> { /* для footer/layout */ }
+   export function generateLocalBusinessSchema(): WithContext<LocalBusiness> { /* если у заказчика физический офис */ }
+   export function generateArticleSchema(post: Post): WithContext<Article> { /* для блога */ }
+   // generateBreadcrumbSchema(slug) уже есть из спеки 05 — проверить, что использует WithContext<BreadcrumbList>
+   ```
 4. Внедрить `Organization` schema в `app/layout.tsx`:
    ```tsx
    <script type="application/ld+json"
@@ -59,7 +63,7 @@
 ### 4. Чистка дублей и canonical
 
 8. Каждая страница имеет уникальный canonical (см. metadata.alternates.canonical)
-9. Проверить нет ли страниц с одинаковыми title/description (через `npm run build` + ручной обход)
+9. Проверить нет ли страниц с одинаковыми title/description (через `pnpm build` + ручной обход)
 10. Закрыть от индексации страницы с GET-параметрами (уже в robots.ts через `/*?*`)
 
 ### 5. Yandex-специфика

@@ -29,8 +29,8 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 1. `git tag pre-spec-11` — точка отката
 2. Запустить bundle analyzer:
    ```bash
-   npm install -D @next/bundle-analyzer
-   ANALYZE=true npx next build
+   pnpm add -D @next/bundle-analyzer
+   ANALYZE=true pnpm exec next build
    ```
 3. PSI замер главной + одной страницы услуги (mobile + desktop) — записать стартовые цифры в `.claude/memory/lessons.md` (не для урока, а как baseline)
 
@@ -63,7 +63,7 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 
 ### 5. Изображения
 
-11. `next/image` берёт на себя ресайз и WebP/AVIF на лету (sharp подключается как `optionalDependency` Next.js 15+ — устанавливается автоматически). К `npm run build` пост-процессинг изображений **не подключаем**. Если есть тяжёлая статика в `public/` (фоновые JPEG/PNG, перенесённые со старого сайта) — однократно прогнать вручную:
+11. `next/image` берёт на себя ресайз и WebP/AVIF на лету (sharp подключается как `optionalDependency` Next.js 15+ — устанавливается автоматически). К `pnpm build` пост-процессинг изображений **не подключаем**. Если есть тяжёлая статика в `public/` (фоновые JPEG/PNG, перенесённые со старого сайта) — однократно прогнать вручную:
     ```bash
     npx sharp-cli --input "public/**/*.{jpg,jpeg,png}" --output public/ --mozjpeg --quality 75
     ```

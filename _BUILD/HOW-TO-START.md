@@ -62,23 +62,30 @@ xcode-select --install
 
 Проверка: `brew --version`
 
-### 0.4. GitHub CLI (gh) + Node.js
+### 0.4. GitHub CLI (gh) + mise (Node + pnpm)
 
 ```bash
-brew install gh node
+brew install gh mise
+echo 'eval "$(mise activate zsh)"' >> ~/.zshrc
+source ~/.zshrc
+
+mise use --global node@22
+mise use --global pnpm@latest
 ```
 
-Проверка: `gh --version && node --version && npm --version`
+`mise` — единый менеджер версий: ставит и Node, и pnpm, и любой другой тул, который понадобится. В каждом проекте читает `.tool-versions` и подменяет версии под локальный проект автоматически — никакого `nvm use` руками.
+
+Проверка: `gh --version && node --version && pnpm --version`
 
 Должно вывести что-то вроде:
 
 ```
 gh version 2.x.x ...
 v22.x.x         ← важно: 22 или новее (Next.js 16 требует)
-10.x.x
+9.x.x           ← pnpm
 ```
 
-Если `node --version` показывает меньше `v22` — `brew upgrade node`.
+Если `node --version` показывает меньше `v22` — `mise use --global node@22` ещё раз (mise сам перекачает).
 
 ### 0.5. Git identity
 

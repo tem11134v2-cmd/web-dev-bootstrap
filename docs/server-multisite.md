@@ -52,7 +52,7 @@ sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 
 ## Что может пойти не так с несколькими сайтами
 
-1. **Конкуренция за CPU/RAM во время билда.** `npm run build` у Next.js съедает 1.5–2 GB RAM. Если два сайта билдятся одновременно (например, оба пушили почти одновременно) — OOM. Решения:
+1. **Конкуренция за CPU/RAM во время билда.** `pnpm build` у Next.js съедает 1.5–2 GB RAM. Если два сайта билдятся одновременно (например, оба пушили почти одновременно) — OOM. Решения:
    - Swap (см. `server-manual-setup.md` § 4).
    - В GitHub Actions выставить `concurrency: { group: "vps-build", cancel-in-progress: false }` — тогда Actions выстроит деплои в очередь.
    - На мощных сайтах — выносить prod на отдельный VPS.

@@ -34,7 +34,7 @@ Core Web Vitals в зелёной зоне: **LCP < 2.5s, CLS < 0.1, INP < 200ms
 
 ## 4. JavaScript
 
-**Минификация и tree-shaking.** Проверять размеры через `npx @next/bundle-analyzer`.
+**Минификация и tree-shaking.** Проверять размеры через `@next/bundle-analyzer` (`pnpm add -D @next/bundle-analyzer`, обернуть `next.config.ts` в `withBundleAnalyzer`, запустить `ANALYZE=true pnpm build`).
 
 **Красные флаги зависимостей:**
 
@@ -136,7 +136,7 @@ const nextConfig = {
 npx sharp-cli --input "public/**/*.{jpg,jpeg,png}" --output public/ --mozjpeg --quality 75
 ```
 
-К `npm run build` это не подключаем — пусть остаётся одноразовой операцией.
+К `pnpm build` это не подключаем — пусть остаётся одноразовой операцией.
 
 ## 11. Accessibility (a11y)
 

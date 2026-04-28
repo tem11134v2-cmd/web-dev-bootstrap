@@ -32,8 +32,8 @@ mkdir -p ~/prod/{site}
 cd ~/prod/{site}
 git clone git@github.com:{owner}/{repo}.git .
 git checkout main
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm build
 PORT={prod-port} pm2 start npm --name {site}-prod -- start
 pm2 save
 ```
@@ -45,8 +45,8 @@ mkdir -p ~/dev/{site}
 cd ~/dev/{site}
 git clone git@github.com:{owner}/{repo}.git .
 git checkout dev
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm build
 PORT={dev-port} pm2 start npm --name {site}-dev -- start
 pm2 save
 ```
@@ -162,7 +162,7 @@ pm2 logs {site}-prod --lines 20       # проверь, рестартнулся
 
 ## Частые проблемы
 
-- **502 после деплоя** → `pm2 restart {site}-prod`, `pm2 logs`. Часто — забыли `npm ci` после изменения зависимостей.
+- **502 после деплоя** → `pm2 restart {site}-prod`, `pm2 logs`. Часто — забыли `pnpm install --frozen-lockfile` после изменения зависимостей.
 - **`git pull` в GH Actions падает** → ключ `deploy_key` не добавлен в GitHub или папка `~/prod/{site}` не инициализирована.
 - **Caddy не выпускает SSL** → `dig +short {domain}` не показывает IP сервера (DNS не пропагнулся), либо `ufw` блокирует 80/443. Лог: `journalctl -u caddy -n 50 | grep -i obtain`.
 - **`caddy validate` падает после правки** → typo в Caddyfile синтаксисе. Caddy показывает строку и причину; обычно — забытая `}` или пробел перед `{`.

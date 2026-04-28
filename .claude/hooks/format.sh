@@ -15,8 +15,8 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 [ ! -f "$root/package.json" ] && exit 0
 
 cd "$root" || exit 0
-if [ -x "node_modules/.bin/prettier" ]; then
-  node_modules/.bin/prettier --write --log-level=silent "$file" 2>/dev/null || true
+if [ -x "node_modules/.bin/biome" ]; then
+  node_modules/.bin/biome check --write --no-errors-on-unmatched "$file" 2>/dev/null || true
 fi
 
 exit 0

@@ -92,7 +92,7 @@
 
 8. Установить `@tailwindcss/typography` (если ещё не):
    ```bash
-   npm install -D @tailwindcss/typography
+   pnpm add -D @tailwindcss/typography
    ```
 9. Применить `prose` классы к контенту статьи: `<article className="prose prose-lg max-w-3xl mx-auto">`
 10. Настроить prose-цвета под бренд проекта
@@ -101,7 +101,7 @@
 
 11. Создать 2-3 тестовых статьи (или взять реальные из брифа)
 12. Проверить: список открывается, статья открывается, MDX рендерится, метаданные верные, JSON-LD валиден
-13. `npm run build` проходит
+13. `pnpm build` проходит
 
 ## Boundaries
 
@@ -116,7 +116,7 @@
 - `/blog/[slug]/` показывает статью с правильным MDX-рендером
 - Метаданные, JSON-LD Article, sitemap включают статьи
 - prose-стили применены, читается комфортно
-- `npm run build` проходит
+- `pnpm build` проходит
 
 ## Memory updates
 

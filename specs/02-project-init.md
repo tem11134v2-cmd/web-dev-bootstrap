@@ -9,13 +9,13 @@
 
 ## Goal
 
-Создать Next.js-проект со всей структурой папок, установленными зависимостями и базовой конфигурацией. На выходе — `npm run dev` показывает пустую страницу без ошибок, готовая база для дизайн-системы.
+Создать Next.js-проект со всей структурой папок, установленными зависимостями и базовой конфигурацией. На выходе — `pnpm dev` показывает пустую страницу без ошибок, готовая база для дизайн-системы.
 
 ## Tasks
 
-1. Создать Next.js проект:
+1. Создать Next.js проект (флаг `--no-eslint` — линтер ставим отдельно, через Biome, см. шаг 5):
    ```bash
-   npx create-next-app@latest [project-name] --typescript --tailwind --app --turbopack
+   npx create-next-app@latest [project-name] --typescript --tailwind --app --turbopack --no-eslint
    cd [project-name]
    ```
 2. Инициализировать shadcn/ui:
@@ -29,9 +29,18 @@
    ```
 4. Установить дополнительные пакеты:
    ```bash
-   npm install react-hook-form @hookform/resolvers zod next-mdx-remote gray-matter sharp lucide-react clsx tailwind-merge class-variance-authority tw-animate-css
+   pnpm add react-hook-form @hookform/resolvers zod next-mdx-remote gray-matter sharp lucide-react clsx tailwind-merge class-variance-authority tw-animate-css
    ```
-5. Настроить `next.config.ts` (без standalone — см. `docs/stack.md`):
+5. Установить и инициализировать Biome (заменяет ESLint+Prettier) + типы Schema.org:
+   ```bash
+   pnpm add -D --save-exact @biomejs/biome
+   pnpm add -D schema-dts
+   pnpm exec biome init
+   ```
+   Скопировать содержимое `biome.json.example` из bootstrap-репо в `biome.json` проекта (или адаптировать сгенерированный). Ключевые настройки: `linter.recommended + a11y.recommended`, `formatter.lineWidth: 100`, `quoteStyle: single`, `semicolons: asNeeded`, `useSortedClasses` для Tailwind. После — прогнать `pnpm exec biome check --write` один раз, чтобы привести create-next-app файлы к формату.
+
+   `schema-dts` даёт типы для JSON-LD (`WithContext<Service>`, `WithContext<BreadcrumbList>` и т.д.) — используются в `lib/schema.ts` начиная со спеки 05. Без них опечатка в `@type` ловится только Yandex Validator-ом на проде.
+6. Настроить `next.config.ts` (без standalone — см. `docs/stack.md`):
    ```typescript
    const nextConfig = {
      compress: false, // сжатие делает Caddy (encode gzip zstd в шаблоне server-add-site)
@@ -43,16 +52,19 @@
      reactStrictMode: true,
    }
    ```
-6. Настроить `package.json` scripts (dev на Mac и prod на VPS используют один порт 3000; на VPS фактический порт передаётся через переменную `PORT` при `pm2 start`):
+7. Настроить `package.json` scripts (dev на Mac и prod на VPS используют один порт 3000; на VPS фактический порт передаётся через переменную `PORT` при `pm2 start`):
    ```json
    "scripts": {
      "dev": "next dev -p 3000 --turbopack",
      "build": "next build",
      "start": "next start -p 3000",
-     "lint": "next lint"
+     "lint": "biome check",
+     "format": "biome check --write",
+     "typecheck": "tsc --noEmit"
    }
    ```
-7. Создать структуру папок (если каких-то нет):
+   `lint` и `format` идут через Biome (он же сортирует Tailwind-классы — `prettier-plugin-tailwindcss` ставить не надо). `typecheck` отделён от `lint`, потому что Biome не делает проверку типов — её делает `tsc`.
+8. Создать структуру папок (если каких-то нет):
    ```
    app/                  # уже создано create-next-app
    components/ui/        # уже создано shadcn/ui init
@@ -67,25 +79,26 @@
    public/og/            # создать (для OG-картинок)
    data/                 # создать (для leads.json fallback)
    ```
-8. Создать `.gitignore` с обязательными исключениями: `.env*`, `data/leads.json`, `node_modules`, `.next`, `*.log`
-9. Создать пустой `app/layout.tsx` с базовым HTML-каркасом (lang="ru", placeholder Header/Footer, ConsultationDialogProvider — будет добавлен в спеке 04)
-10. Создать пустую `app/page.tsx` (просто `<main>Hello</main>` — наполнение в спеке 04)
-11. Скопировать `CLAUDE.md` из bootstrap в корень проекта, заполнить секцию `Project: [name]`
-12. Первый коммит: `chore: initial Next.js setup`
-13. Проверка: `npm run dev` — открыть localhost:3000 — пустая страница без ошибок в консоли
+9. Создать `.gitignore` с обязательными исключениями: `.env*`, `data/leads.json`, `node_modules`, `.next`, `*.log`
+10. Создать пустой `app/layout.tsx` с базовым HTML-каркасом (lang="ru", placeholder Header/Footer, ConsultationDialogProvider — будет добавлен в спеке 04)
+11. Создать пустую `app/page.tsx` (просто `<main>Hello</main>` — наполнение в спеке 04)
+12. Скопировать `CLAUDE.md` из bootstrap в корень проекта, заполнить секцию `Project: [name]`
+13. Первый коммит: `chore: initial Next.js setup`
+14. Проверка: `pnpm dev` — открыть localhost:3000 — пустая страница без ошибок в консоли
 
 ## Boundaries
 
 - **Always:** использовать точные версии из docs/stack.md, не «latest» наугад
 - **Ask first:** перед добавлением любой зависимости, не указанной в docs/stack.md
-- **Never:** удалять `package-lock.json`, добавлять Radix напрямую (только через shadcn base-ui), править файлы внутри `.next/`
+- **Never:** удалять `pnpm-lock.yaml`, добавлять Radix напрямую (только через shadcn base-ui), править файлы внутри `.next/`
 
 ## Done when
 
-- `npm run dev` запускает сервер на порту 3000 без ошибок
+- `pnpm dev` запускает сервер на порту 3000 без ошибок
 - Все папки структуры созданы
 - shadcn/ui компоненты установлены, Tailwind работает (проверка: `<Button>` рендерится со стилями)
 - `next.config.ts` содержит настройку изображений и `compress: false`
+- `biome.json` существует в корне; `pnpm lint` и `pnpm format` отрабатывают без падений; в `package.json` нет ESLint/Prettier-зависимостей
 - `CLAUDE.md` в корне проекта, секция `Project:` заполнена
 - Первый коммит создан
 

@@ -30,14 +30,14 @@ cd <repo>
 ### 3. Установить зависимости
 
 ```bash
-nvm use         # подхватит версию из .nvmrc
-npm install
+mise install   # подхватит версию из .tool-versions (если используется mise)
+pnpm install
 ```
 
 ### 4. Запустить локально
 
 ```bash
-npm run dev
+pnpm dev
 # → http://localhost:3000
 ```
 

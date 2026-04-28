@@ -55,8 +55,8 @@ set -euo pipefail
 cd "${remote_dir}"
 git fetch --quiet
 git reset --hard "${hash}"
-npm ci --no-audit --no-fund
-npm run build
+pnpm install --frozen-lockfile
+pnpm build
 pm2 restart "${pm2_name}" --update-env >/dev/null
 pm2 save >/dev/null
 echo "Rolled back to: \$(git rev-parse --short HEAD) - \$(git log -1 --format=%s)"

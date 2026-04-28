@@ -28,7 +28,7 @@
 
 ### 2. Подключить сайт на новом VPS
 
-3. Пройти `docs/server-add-site.md` на новом сервере: папки, клон `main`, `npm ci && npm run build`, `PORT=... pm2 start`, nginx-конфиг **без SSL** пока (A-запись ещё на старом IP).
+3. Пройти `docs/server-add-site.md` на новом сервере: папки, клон `main`, `pnpm install --frozen-lockfile && pnpm build`, `PORT=... pm2 start`, Caddy-конфиг (SSL Caddy выпустит автоматически после переключения DNS).
 4. Не запускать `certbot` пока — валидация упадёт, домен ещё не смотрит сюда.
 
 ### 3. Перенести runtime-данные

@@ -21,7 +21,7 @@ Claude проверяет через Bash:
 
 ```bash
 node -v              # ≥ 22
-npm -v               # ≥ 10
+pnpm -v              # ≥ 9
 git --version        # ≥ 2.40
 gh --version         # ≥ 2.0, и `gh auth status` подтверждает login
 ```
@@ -56,21 +56,22 @@ ssh -T git@github.com
 - Локальный путь проекта: `~/projects/{site}` (абсолютный).
 - GitHub URL репо.
 - Ветки: `main` (prod, protected), `dev` (integration).
-- Версии `node`, `npm`, ссылка на `.nvmrc` если есть.
+- Версии `node`, `pnpm`, ссылка на `.tool-versions` если есть.
 - Email в git.
 
-### 5. `.nvmrc` и lock-файл
+### 5. `.tool-versions` и lock-файл
 
 Создай в корне проекта:
 
 ```
-# .nvmrc
-22
+# .tool-versions
+node 22
+pnpm latest
 ```
 
-Это чтобы на VPS (у которого `nvm` может быть) и у других разработчиков совпадала версия Node.
+Это чтобы у других разработчиков и на VPS (через `mise install`) совпадали версии Node и pnpm. `mise` автоматически читает этот файл и подменяет версии при `cd` в папку.
 
-Lock-файл (`package-lock.json`) появится в спеке `02-project-init` после `create-next-app`. Обязательно коммить его — GitHub Actions использует `npm ci`.
+Lock-файл (`pnpm-lock.yaml`) появится в спеке `02-project-init` после `create-next-app` и первого `pnpm install`. Обязательно коммить его — GitHub Actions использует `pnpm install --frozen-lockfile`.
 
 ## Boundaries
 
@@ -83,7 +84,7 @@ Lock-файл (`package-lock.json`) появится в спеке `02-project-i
 - Все команды из п. 1 проходят.
 - `git config` заполнен, `ssh -T git@github.com` приветствует.
 - `.claude/memory/references.md` обновлён.
-- `.nvmrc` создан, закоммичен.
+- `.tool-versions` создан, закоммичен.
 
 ## Memory updates
 
