@@ -1,4 +1,4 @@
-# web-dev-bootstrap v2.3-dx
+# web-dev-bootstrap v3.0
 
 Промпт-пакет для Claude Code Desktop, который превращает его в дисциплинированного
 frontend-разработчика конверсионных сайтов на Next.js. Не зависимость, не
@@ -71,7 +71,7 @@ _BUILD/                    — служебное: changelog, claude-md-template
 - **[CLAUDE.md](CLAUDE.md)** — правила проекта + указатели на KB и спеки
 - **[docs/INDEX.md](docs/INDEX.md)** — карта Knowledge Base
 - **[specs/INDEX.md](specs/INDEX.md)** — последовательность спек + граф
-- **[_BUILD/changelog.md](_BUILD/changelog.md)** — история версий (v2.0 → v2.3.x)
+- **[_BUILD/changelog.md](_BUILD/changelog.md)** — история версий (v2.0 → v3.0)
 
 ## Философия
 
@@ -87,13 +87,7 @@ _BUILD/                    — служебное: changelog, claude-md-template
 
 ## Версия
 
-v2.3-dx (2026-04-28). DX win поверх v2.3-caddy: ESLint+Prettier → **Biome** (один бинарник,
-~10× быстрее, встроенная сортировка Tailwind-классов), npm → **pnpm** (через corepack/mise),
-nvm → **mise** (единый менеджер версий, читает `.tool-versions`), добавлен **schema-dts**
-для типобезопасных JSON-LD генераторов в `lib/schema.ts`. Все изменения локальны на Mac
-разработчика — рантайм сайтов не трогали. v2.3-caddy ранее заменил nginx+certbot на Caddy
-(встроенный ACME). Большой рефакторинг под v3.0 идёт по плану в `_BUILD/v3/01-bootstrap-refactor.md`.
-Полная история — `_BUILD/changelog.md`.
+v3.0 (2026-04-29). Финал большого рефакторинга `_BUILD/v3/01-bootstrap-refactor.md` (7 фаз). Стек: **Caddy** (auto-HTTPS) вместо nginx+certbot, **push-based deploy** (build на GitHub runner → rsync → атомарный switch симлинком, миллисекунды, без пересборки на VPS), `output: 'standalone'` в Next 16, **Biome** вместо ESLint+Prettier, **pnpm** через mise/corepack, **schema-dts** для типобезопасных JSON-LD, **Cloudflare Turnstile** в формах, **Content Collections** для MDX, **Server Actions** + `useActionState` (вместо Route Handler `/api/lead`), опциональные **`use cache`** + **PPR** + **OKLCH** в Tailwind v4. Sequential **multi-Claude протокол** через `/handoff` + `/resume` + `/catchup` + stop-reminder hook. Полная история — `_BUILD/changelog.md`.
 
 ## Лицензия
 

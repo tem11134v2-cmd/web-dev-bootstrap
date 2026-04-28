@@ -1,49 +1,80 @@
 ---
 name: project_state
-description: Активная фаза bootstrap-refactor (v3.0) и история фаз
+description: Активная фаза/спека, блокеры, журнал сессий, история завершённого
 type: project
 ---
 
-# Активное состояние проекта
+<!--
+Универсальный шаблон состояния проекта.
 
-> Этот файл — для самого `web-dev-bootstrap` (мы в канонической папке шаблона).
-> Когда шаблон клонируется в реальный сайт, файл перезаписывается под формат «спеки 00–13».
+- Для самого `web-dev-bootstrap` (когда в нём идёт рефакторинг) — «Active phase» = имя фазы.
+  Раздел «Completed phases history» хранит выполненные фазы со ссылкой на `_BUILD/changelog.md`.
+- Для сайта, клонировавшего bootstrap (`gh repo create --template`) — стереть содержимое и
+  заполнить под свой проект: «Active phase» = текущая спека (00–13), «Completed phases history»
+  переименовать в «Completed specs history».
 
-## Текущая фаза bootstrap-refactor (v3.0)
+Обновляется триггерами из CLAUDE.md: после спеки/фазы, при `/handoff`, при изменении блокеров.
+-->
 
-- **Активная:** Фаза 6 — Multi-Claude handoff + новый HOW-TO-START + claude-md-template (финальная фаза рефакторинга)
-- **ТЗ:** `_BUILD/v3/01-bootstrap-refactor.md` (раздел «Фаза 6», начиная со строки ~1052)
-- **Feature-ветка следующей сессии:** `feat/v3.0-handoff-protocol`
-- **Целевой тег после фазы:** `v3.0`
-- **Сложность:** низкая (правки в HOW-TO-START / claude-md-template + multi-Claude handoff протокол)
+# Project state
 
-## История фаз
+## Active phase
 
-- 2026-04-28 — **Фаза 5 (push-based deploy + standalone + раздельные SSH-ключи) — done**, тег `v3.0-deploy`. PR в ветке `feat/v3.0-push-deploy`. 9 атомарных коммитов: feat(standalone) — `output: 'standalone'` в шаблоне `next.config.ts` (specs/02), переписан блок «Почему без standalone» в `docs/stack.md` на положительный, PM2-команда обновлена на `pm2 start current/server.js`. feat(workflow) — канонические `_BUILD/v3/templates/deploy-prod.yml.example` и `deploy-dev.yml.example` (build standalone-артефакта на ubuntu-latest → upload artifact → deploy job: ssh-keygen из SSH_PRIVATE_KEY → rsync deploy/ в releases/<github.sha>/ → пушит .env из PROD_ENV_FILE secret heredoc-ом → ln -sfn current → pm2 reload → cleanup last 5 для prod / last 3 для dev). feat(ssh-keys) — удалён шаг [7/8] генерации `~/.ssh/deploy_key` из `bootstrap-vps.sh` (приватный ключ живёт ТОЛЬКО в GitHub Secrets), git и pnpm убраны с VPS (apt install только nodejs+caddy, PM2 через npm install -g, шаги перенумерованы [N/7]); `docs/server-manual-setup.md` и `server-add-site.md` переписаны под VPS-без-build-toolchain (mkdir releases/, ssh-copy-id публичной части single-purpose ключа, секреты через GitHub Environment). feat(releases-dir) — структура `/home/deploy/prod/{site}/releases/<sha>/` + симлинк `current/` задокументирована в `docs/server-add-site.md` § 3 (с tree-визуализацией) и `docs/deploy.md` (новый раздел «Структура релизов на VPS»); первый деплой создаёт current/ автоматически. refactor(rollback) — `scripts/rollback.sh` переписан под атомарный switch симлинка (миллисекунды, без пересборки), сигнатура `[site] [ssh_alias]` без `<commit-hash>`; `docs/automation.md`, `CLAUDE.md` Automation rules, `scripts/README.md` обновлены. feat(env-secrets) — `.env` через GitHub Environment Secret `PROD_ENV_FILE` (multiline = всё содержимое .env.production), workflow пишет в `releases/<sha>/.env` каждым деплоем; `scripts/sync-env.sh` оставлен как fallback для трёх ситуаций (Actions недоступны / mid-cycle / recovery), путь обновлён на `current/.env`, pm2 reload; `_BUILD/HOW-TO-START.md` §§ 8–9 переписаны под gh secret set + симлинк-rollback. refactor(specs) — `specs/01b-server-handoff.md` переписана под push-deploy + Caddy (Tasks ссылаются на `_BUILD/v3/templates/`, deploy/{site}.caddy.example вместо nginx.conf.example, deploy/README.md включает генерацию SSH-ключа на Mac + Environment Secrets); `specs/12-handoff.md` runbook (Откат, Обновления не приехали, Лиды, Сайт медленный) под push-based реальность; `specs/14-migrate.md` (M1–M4) — `mkdir releases/` + ssh-copy-id + workflow trigger пустым коммитом вместо git clone + pnpm build на новом VPS, certbot убран (Caddy auto-issue), decom через `sudo rm /etc/caddy/Caddyfile.d/{site}.caddy`. docs(deploy) — `docs/deploy.md` ASCII-схема переписана (Mac → GitHub → runner → rsync → VPS), workflow описан таблицей secrets/variables под Environment; `docs/troubleshooting.md` — старая «deploy_key permission denied» → «SSH permission denied в deploy job» (диагностика парности через ssh-keygen -y), добавлены сценарии «Симлинк current не переключился», «rsync ошибка», «PM2 не находит server.js»; «Prod 404» переписан под симлинк; `docs/performance.md` § 6–9 + `specs/11-performance.md` § 9 переведены с nginx на Caddy (encode gzip zstd, @static path + header Cache-Control, таблица «что Caddy делает по умолчанию» вместо ручного ssl-блока), Caddy-бэкап вне Caddyfile.d/. chore(memory) — этот changelog + project_state.
+**Bootstrap-refactor v3.0 — done.** Все 7 фаз закрыты (тег `v3.0` на `origin/main`). Bootstrap зафиксирован на v3.0. Следующий трек — ТЗ-2 (миграция живых проектов на v3.0) — запускается **в папках конкретных старых сайтов**, а не в bootstrap'е.
 
-  C-level backlog после Фазы 1 закрыт в Фазе 5: `specs/01b` и `specs/14-migrate` теперь полностью на Caddy + push-deploy; `docs/performance.md` § 7–8 + `specs/11-performance.md` § 9 переписаны с nginx на Caddy. Открытых C-level пунктов из Фазы 1 не осталось.
+## Active spec
 
-  Сам bootstrap-репо ничего не билдит — изменения проявятся только в новых проектах из шаблона после merge'а. Существующие проекты на pull-based deploy продолжают работать; миграция на push-based точечная (`_BUILD/v3/02-migrate-existing-project.md`). ⚠️ Реальный push-based деплой на live-VPS пока не обкатывался — фаза покрыта письменной верификацией и rollback-планом, но первый реальный run будет happen-after-merge.
-- 2026-04-28 — **Фаза 4 (Next.js 16 паттерны) — done**, тег `v3.0-next16`. PR в ветке `feat/v3.0-next16-patterns`. 5 атомарных коммитов: feat(server-actions) — миграция лид-форм с `app/api/lead/route.ts` на Server Action `app/actions/submit-lead.ts` (`useActionState` + `<form action={formAction}>`, типизированный `LeadState`, прогрессивное улучшение, CSRF из коробки; полностью переписан `docs/forms-and-crm.md` и `specs/09`, обновлены `CLAUDE.md` / `claude-md-template.md` / `docs/architecture.md` / `docs/INDEX.md` / `specs/INDEX.md` / `specs/12-handoff.md` / `specs/optional/opt-quiz.md` / `.claude/memory/pointers.md`); `useOptimistic` как опциональный паттерн добавлен попутно в `docs/forms-and-crm.md` с явной заметкой что для лид-формы не нужен (fallback в JSON и так делает её всегда успешной). feat(use-cache) — раздел про директиву `use cache` в `docs/performance.md` § 7 с явными критериями где НЕ применять (per-request state, cookies/headers/searchParams) и упоминаниями в `specs/05` (для тяжёлых server-компонентов) + `specs/07` (callout, что поверх Content Collections обычно избыточно). feat(ppr) — Partial Prerendering как опциональный паттерн в `docs/architecture.md` (только для лендингов с гибридным static+dynamic), `experimental.ppr: 'incremental'` в шаблоне `next.config.ts` в `specs/02` (opt-in per-route через `experimental_ppr = true`). feat(oklch) — OKLCH как дефолтное цветовое пространство для палитр Tailwind v4 в `docs/design-system.md` (4 причины: предсказуемое осветление, плавные градиенты, перцептивно ровный hover, P3-гаммы) + перепись шагов 1–3 в `specs/03` (HEX в комментариях для сверки с брифом, токены через `@theme` в `globals.css` без `tailwind.config.ts`). chore(memory) — changelog v3.0-next16 + этот файл. Сам bootstrap ничего не билдит — изменения проявятся в новых проектах из шаблона.
-- 2026-04-28 — **Фаза 3 (Turnstile + Content Collections) — done**, тег `v2.4`. PR в ветке `feat/v2.4-turnstile-content-collections`. 3 атомарных коммита: feat(turnstile) — Cloudflare Turnstile в формах (`@marsidev/react-turnstile` клиент + verify ДО CRM в /api/lead, новый раздел в docs/forms-and-crm.md, отдельная секция «1. Cloudflare Turnstile» в specs/09 и Turnstile-edge-кейсы в тестировании, добавлен в init-команду stack.md и spec/02), feat(content-collections) — полный rewrite specs/07 под Content Collections (Zod-схема в content-collections.ts, withContentCollections(nextConfig), типизированный allPosts, <MDXContent /> для рендера; обновлены docs/architecture.md и docs/stack.md, в pointers.md новый раздел «Контент»; CC ставится опционально только в spec/07, из дефолтного init убран вместе со старыми next-mdx-remote+gray-matter), chore(memory) — changelog v2.4 + project_state. Сам bootstrap ничего не билдит — изменения проявятся в новых проектах из шаблона.
-- 2026-04-28 — **Фаза 2 (DX win) — done**, тег `v2.3-dx`. PR в ветке `feat/v2.3-dx-biome-pnpm-mise`. 8 атомарных коммитов: feat(biome) — Biome заменил ESLint+Prettier (один бинарник, useSortedClasses для Tailwind, biome.json.example в корне, format.sh hook), chore(pnpm) ×2 — sweep по specs/ и docs/scripts/CLAUDE.md (npm install → pnpm add, npm ci → pnpm install --frozen-lockfile, npm run X → pnpm X), feat(pnpm) — corepack на VPS (bootstrap-vps.sh) и на Mac (HOW-TO-START § 0.4), feat(mise) — `.tool-versions` вместо `.nvmrc`, mise activate в zshrc, feat(schema-dts) — типобезопасные WithContext<T> в lib/schema.ts (specs/05 + 08), chore(severity) — Stack/Commands/Версия в CLAUDE.md, claude-md-template, README (поднял до v2.3-dx, Phase 1 не делала). Сам bootstrap ничего не билдит — изменения проявятся в новых проектах из шаблона.
-- 2026-04-28 — **Фаза 1 (Caddy) — done**, тег `v2.3-caddy`. PR в ветке `feat/v2.3-caddy`. 11 атомарных коммитов: bootstrap-vps.sh (apt-репо Caddy + `CADDY_ADMIN_EMAIL`), server-manual-setup, server-add-site (Caddy-шаблон с reverse_proxy + encode + cache headers), server-multisite (Caddyfile.d), deploy.md, troubleshooting.md (Caddy startup + SSL разделы), specs/12-handoff (Caddy в runbook), changelog, project_state, severity-A (stack-строки CLAUDE.md / claude-md-template / references.md), severity-B (README, docs/INDEX, scripts/README, domain-connect, seo, specs/02/08, optional/opt-i18n + opt-migrate). C-level отложено: `specs/01b` (генератор шаблона), `specs/14-migrate` (runbook), `docs/performance.md` + `specs/11-performance.md` (nginx-секции) — **закрыто в Фазе 5**.
-- 2026-04-28 — **Фаза 0 (P0 hotfixes) — done**, тег `v2.2.2`. PR #6 (squash `660a108`). 12 атомарных коммитов: compress-images, localhost:4000, версии, migration-map, схемы A/B, ConsultationDialog spec, /privacy в footer, hooks.json→settings.json, scripts/README дополнен, Zod→Valibot убран, IDEAS.md убран, changelog v2.2.2.
+- File: N/A
+- Status: refactor done
+- Started/Finished: 2026-04-28 → 2026-04-29
 
-## Что делать в новой сессии (Фаза 6)
-
-1. `pwd` — если в worktree, проверить sync с `origin/main` (`git fetch && git status`).
-2. Если ветка автогенерёная (`claude/<имя>`) — `git branch -m feat/v3.0-handoff-protocol`.
-3. `git tag pre-phase-6` — точка отката.
-4. Прочитать раздел «Фаза 6» из `_BUILD/v3/01-bootstrap-refactor.md` (начиная со строки ~1052) и KB-файлы оттуда.
-5. Низкая сложность: правки в `_BUILD/HOW-TO-START.md`, `_BUILD/claude-md-template.md`, протокол multi-Claude handoff. Можно делать одним проходом.
-6. После Фазы 6 → финальный тег `v3.0` → конец рефакторинга bootstrap.
-
-**Контекст для Фазы 6:**
-
-- Фаза рефакторинга — последняя. После неё bootstrap зафиксирован на v3.0.
-- `_BUILD/HOW-TO-START.md` уже частично обновлён в Фазе 5 (§§ 8–9 переписаны под push-based deploy + симлинк-rollback). В Фазе 6 — прочее: добавление multi-Claude handoff протокола, актуализация `_BUILD/claude-md-template.md` под v3.0 (если ещё указан старый тег), регенерация `.docx`.
-
-## Блокеры
+## Blockers
 
 — нет
+
+## Next 1-3 steps
+
+1. **Запустить ТЗ-2** в папке конкретного старого проекта: открой Claude-чат в `~/projects/{site}`, скажи: «Прочитай файл `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/02-migrate-existing-project.md` и выполни его на этом проекте. Сначала покажи план миграции, жди подтверждения.»
+2. **Outstanding после v3.0** (не блокируют дальнейшую работу, но висят): регенерация `_BUILD/HOW-TO-START.docx` через pandoc + первый реальный push-based деплой на live-VPS (Phase 5 не обкатывалась).
+3. **Точечные правки самого bootstrap'а** делаются как обычно: feature-ветка → squash PR → semver-тег `v3.0.x` / `v3.1` / и т.д.
+
+## Session log
+
+(новые записи добавляются сверху командой `/handoff`)
+
+### Session 2026-04-29 — Phase 6 finalize + tag v3.0
+
+**Done in this session:**
+- Squash-merge PR [#12](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/12) (Phase 5 push-based deploy), тег `v3.0-deploy` поставлен и запушен.
+- Phase 6 (8 атомарных коммитов в ветке `feat/v3.0-handoff-protocol`):
+  - `feat(memory-template)` — реструктуризация `.claude/memory/project_state.md` под session-log формат + двойное назначение (bootstrap-refactor / site template).
+  - `feat(commands)` — `.claude/commands/handoff.md`, `resume.md`, `catchup.md` (Claude Code Desktop сканирует папку автоматически).
+  - `feat(stop-reminder)` — `.claude/hooks/stop-reminder.sh` + патч `session-start.sh` (запись sha в `/tmp/.claude-session-start-sha-$PPID`) + регистрация в `.claude/settings.json` под `Stop`. Sha-фильтр предотвращает спам напоминаний.
+  - `docs(how-to-start)` — `_BUILD/HOW-TO-START.md` §§ 4–5 под `/handoff`+`/resume`, новые §§ 10–11 (миграция v2.x→v3 + обновление bootstrap'а), частые косяки.
+  - `docs(claude-md-template)` — `_BUILD/claude-md-template.md` пересинхронизирован с `CLAUDE.md` (добавлена `## Automation rules`, версия комментария v3.0).
+  - `docs(claude-md)` — секция `## Multi-Claude protocol` в `CLAUDE.md` и шаблоне.
+  - `chore(final-check)` — `README.md` v2.3-dx → v3.0, `CLAUDE.md` BOOTSTRAP META обновлён, `docs/INDEX.md` automation-строка дополнена, в ТЗ-1 добавлен подраздел «Outstanding после v3.0».
+  - `chore(memory)` — этот коммит (changelog v3.0 + project_state финал).
+
+**Open at handoff:**
+- Push ветки `feat/v3.0-handoff-protocol`, создать PR, squash-merge в main, тег `v3.0`. Это закроет Phase 6 на origin.
+- (post-v3.0 outstanding) Регенерация `_BUILD/HOW-TO-START.docx` через pandoc.
+- (post-v3.0 outstanding) Первый реальный push-based деплой на live-VPS.
+
+**Uncommitted changes:** нет
+
+**Resume hint:** Bootstrap v3.0 released. В bootstrap'е больше нет активных фаз. Следующая работа — в папках конкретных старых сайтов, через ТЗ-2 (`_BUILD/v3/02-migrate-existing-project.md`).
+
+---
+
+## Completed phases history
+
+Подробности каждой фазы — `_BUILD/changelog.md`.
+
+- **2026-04-29** — Фаза 6 (Multi-Claude handoff протокол + slash-команды + stop-reminder hook + HOW-TO-START финиш + claude-md-template sync) — done, тег `v3.0`. Ветка `feat/v3.0-handoff-protocol`, 8 атомарных коммитов.
+- **2026-04-28** — Фаза 5 (push-based deploy + standalone + раздельные SSH-ключи) — done, тег `v3.0-deploy`. PR [#12](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/12), 9 атомарных коммитов. C-level backlog Фазы 1 (Caddy в `specs/01b` + `specs/14-migrate`, nginx-секции в `docs/performance.md` + `specs/11-performance.md`) закрыт здесь же. ⚠️ Реальный push-based деплой на live-VPS ещё не обкатан — фаза покрыта письменной верификацией и rollback-планом, первый реальный run будет happen-after-merge.
+- **2026-04-28** — Фаза 4 (Next.js 16 паттерны: Server Actions, `use cache`, опциональный PPR, OKLCH в Tailwind v4) — done, тег `v3.0-next16`. PR [#11](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/11), 5 атомарных коммитов.
+- **2026-04-28** — Фаза 3 (Cloudflare Turnstile в формах + Content Collections для MDX) — done, тег `v2.4`. PR [#10](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/10), 3 атомарных коммита.
+- **2026-04-28** — Фаза 2 (Biome заменил ESLint+Prettier, pnpm заменил npm, mise заменил nvm, schema-dts для типобезопасных JSON-LD) — done, тег `v2.3-dx`. PR [#9](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/9), 8 атомарных коммитов.
+- **2026-04-28** — Фаза 1 (Caddy вместо nginx+certbot, авто-HTTPS из коробки, multi-site через `Caddyfile.d/`) — done, тег `v2.3-caddy`. PR [#8](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/8), 11 атомарных коммитов.
+- **2026-04-28** — Фаза 0 (P0 hotfix bundle, 12 точечных правок без архитектурных изменений) — done, тег `v2.2.2`. PR [#6](https://github.com/tem11134v2-cmd/web-dev-bootstrap/pull/6), 12 атомарных коммитов.

@@ -4,6 +4,8 @@
 
 Если Mac совершенно свежий (новый ноутбук, ничего не настроено) — сначала пройди раздел «0. Первичная настройка Mac» ниже. Это делается один раз на каждый Mac, потом только раздел 1 и дальше на каждый новый сайт.
 
+> **Версия инструкции:** v3.0 (актуально для bootstrap'а на этом теге). Печатная `.docx`-версия в `~/Downloads/HOW-TO-START.docx` синхронизирована с v2.2.1, не v3.0 — если нужна свежая печатка, регенерация отдельной задачей через `pandoc HOW-TO-START.md -o HOW-TO-START.docx` или вручную в Word.
+
 ---
 
 ## 0. Первичная настройка Mac (один раз)
@@ -199,12 +201,23 @@ cd migrator
 
 ## 4. Работа изо дня в день
 
-Одна спека = одна сессия чата. После — `/clear` или новый чат. Claude сохраняет прогресс в `.claude/memory/project_state.md`.
+Одна спека = одна сессия чата. Цикл:
+
+1. Стартуешь сессию — Claude по `session-start` хуку фетчит origin и подсказывает если ветка отстала.
+2. Работаешь по спеке.
+3. **Закончил (или уходишь надолго):** промпт `/handoff` — Claude обновит `.claude/memory/project_state.md` (запись в Session log, Active phase, Next steps), спросит про uncommitted-изменения.
+4. `/clear` или новый чат.
+
+Stop-хук подскажет про `/handoff` если в сессии были коммиты — он не блокирует, просто напоминает.
 
 ## 5. Вернуться к уже начатому сайту
 
 - New chat → Select folder → `~/projects/{site}`.
-- Промпт: `Прочитай .claude/memory/INDEX.md и продолжи с того места, на котором мы остановились.`
+- Промпт: `/resume`
+
+`/resume` прочитает `.claude/memory/project_state.md`, сверится с git-состоянием (порчинг, последние коммиты), кратко резюмирует где остановились и подождёт твоего ОК на старт работы. Если git и память разошлись — Claude стопает и спрашивает как продолжить, не делает ничего сам.
+
+Если `/resume` по какой-то причине не сработает (кеш слетел, ранние версии Claude Desktop не сканируют `.claude/commands/`) — длинный вариант: `Прочитай .claude/memory/INDEX.md, .claude/memory/project_state.md и кратко резюмируй где мы остановились. Жди ОК.`
 
 ## 6. Несколько сайтов одновременно
 
@@ -257,6 +270,28 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 
 Если плохой коммит — это PR-merge (виден как «Merge pull request #N»), Claude подскажет `git revert -m 1 <hash>` (без `-m 1` git упадёт «commit has more than one parent»).
 
+## 10. Мигрировать старый сайт (v2.x) на v3
+
+Если у тебя есть сайт, поднятый из bootstrap'а старой версии (v2.0–v2.4) и хочется переехать на v3.0 — это отдельная задача, не обязательная.
+
+В папке старого сайта — новый Claude-чат. Стартовый промпт:
+
+```
+Прочитай файл ~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/02-migrate-existing-project.md
+и выполни его на этом проекте. Сначала покажи план миграции, жди подтверждения.
+```
+
+Миграция точечная по разделам (Caddy, push-deploy, Server Actions, Biome, Content Collections и т.д.) — можно делать любое подмножество, не обязательно всё сразу. Подробности в `_BUILD/v3/02-migrate-existing-project.md`.
+
+## 11. Обновить сам bootstrap (для меня, разработчика)
+
+В папке `~/ClaudeCode/web-dev-bootstrap` — новый чат.
+
+- **Если рефакторишь bootstrap по большому ТЗ** (типа `_BUILD/v3/01-bootstrap-refactor.md`) — стартовый промпт описан в начале самого ТЗ. Память bootstrap'а сама помнит активную фазу через `.claude/memory/project_state.md`.
+- **Если просто точечная правка** — `/resume` или прямой промпт «улучшить шаблон в [файл]: [описание]».
+
+Изменения коммитятся в feature-ветку, мёрджатся PR в `main` через `gh pr merge --squash`, ставится семвер-тег (`v3.0.x`, `v3.1` и т.д.) и запись в `_BUILD/changelog.md` сверху.
+
 ---
 
 ## Частые косяки
@@ -269,6 +304,8 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 - **Smoke-тест домена возвращает 301 от ddos-guard до DNS cutover** — middlebox перехватывает Host-header. Используй `Host: <IP>` или `/etc/hosts` override. Подробно в `docs/troubleshooting.md` в шаблоне.
 - **`git revert` падает «commit has more than one parent»** — это merge-коммит (PR merge). Используй `git revert -m 1 <hash>`.
 - **Branch protection возвращает 403 «Upgrade to GitHub Pro»** — на private + free она недоступна. Либо `gh auth switch` на public-репо, либо смирись с дисциплиной (один разработчик = ок).
+- **«Claude залип / повторяет круги»** — `/clear` → `/resume`. Свежий 200K-контекст обычно лучше чем починка отравленного.
+- **«После `/resume` Claude думает что мы в другой фазе»** — открой `.claude/memory/project_state.md`, поправь руками раздел `Active phase` под реальность, перезапусти `/resume`. Это редко случается, обычно когда несколько worktree-сессий писали в один файл (запрещено протоколом, см. §6).
 
 ---
 
@@ -291,3 +328,4 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 - **Сайт надо переехать на другой VPS** → спека `14-migrate.md` (4 сценария M1–M4, 7-day soak).
 - **Миграция с живого сайта** (Tilda/WP) → `specs/optional/opt-migrate-from-existing.md`.
 - **Обычные правки уже живого сайта** → спека `13-extend-site.md` (циклическая).
+- **Перевести старый сайт (v2.x bootstrap) на v3.0** → §10 выше + `_BUILD/v3/02-migrate-existing-project.md`.
