@@ -48,13 +48,15 @@
 
 **Когда:** после получения новых TG/SMTP/CRM credentials, при ротации секретов, после изменения переменных окружения.
 
-### `scripts/rollback.sh <commit-hash> [site] [ssh_alias]`
+### `scripts/rollback.sh [site] [ssh_alias]`
 
-Откатывает прод на VPS на указанный коммит: `git fetch && git reset --hard <hash> && pnpm install --frozen-lockfile && pnpm build && pm2 restart`.
+Откатывает прод на VPS на **предыдущий релиз** через атомарный switch симлинка `current → releases/<previous-sha>` + `pm2 reload`. Никакого git fetch, никакого pnpm install, никакого build — миллисекунды.
 
-Спрашивает подтверждение `[y/N]` (это деструктивная операция — коммиты впереди `<hash>` на сервере становятся unreachable до следующего git fetch с GitHub).
+Скрипт сам находит предыдущий sha (последний по mtime в `releases/`, исключая текущий) и переключает симлинк. Если в `releases/` лежит только один релиз — отказывается, отката нет.
 
-**После rollback** — обязательно на Mac: `git revert <bad-commit> && git push origin main`. Иначе следующий push в main снова катнёт сломанный коммит.
+Спрашивает подтверждение `[y/N]`. Это **не** деструктивная операция (старые папки релизов остаются на месте, чистит их workflow по правилу last-5/last-3), но трогает прод-трафик — поэтому подтверждение обязательно.
+
+**После rollback** — обязательно на Mac: `git revert <bad-commit> && git push origin main`. Иначе следующий push в main соберёт и rsync-нет тот же сломанный коммит поверх отката.
 
 ### `scripts/bootstrap-vps.sh`
 

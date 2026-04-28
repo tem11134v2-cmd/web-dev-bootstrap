@@ -5,9 +5,9 @@
 
 | Файл | Назначение | Документация |
 |------|------------|--------------|
-| `bootstrap-vps.sh` | Разовая настройка свежего Ubuntu 22.04 / 24.04 VPS: deploy user, SSH hardening, ufw, fail2ban, swap, Node/Caddy/PM2, папки, deploy-ключ | `docs/server-manual-setup.md` |
-| `rollback.sh` | Откат прода на VPS на указанный коммит: `git reset --hard <hash>` + `pnpm install --frozen-lockfile` + `pnpm build` + `pm2 restart`. Подсказывает корректный `git revert` (с `-m 1` для merge-коммитов) | `docs/automation.md` |
-| `sync-env.sh` | Синхронизация локального `~/projects/{site}/.env.production` на VPS в `/home/deploy/prod/{site}/.env`, `chmod 600` + `pm2 restart --update-env`. Один канонический путь, без вопросов | `docs/automation.md` |
+| `bootstrap-vps.sh` | Разовая настройка свежего Ubuntu 22.04 / 24.04 VPS: deploy user, SSH hardening, ufw, fail2ban, swap, Node runtime + Caddy + PM2, папки. Под push-based deploy ни pnpm, ни git на VPS не ставит | `docs/server-manual-setup.md` |
+| `rollback.sh` | Атомарный откат прода: переключает симлинк `~/prod/{site}/current → releases/<previous-sha>/` + `pm2 reload`. Без пересборки, миллисекунды. Подсказывает корректный `git revert` (с `-m 1` для merge-коммитов) | `docs/automation.md` |
+| `sync-env.sh` | Fallback-инструмент: копирует локальный `~/projects/{site}/.env.production` на VPS, `chmod 600`, `pm2 restart --update-env`. В штатном flow `.env` пушит сам workflow из `PROD_ENV_FILE` Environment-секрета — sync-env.sh нужен только если Actions недоступны или надо подкинуть env между деплоями | `docs/automation.md` |
 
 ## Принципы
 
