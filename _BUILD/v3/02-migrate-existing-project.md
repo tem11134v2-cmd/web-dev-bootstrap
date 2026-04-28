@@ -466,29 +466,38 @@ import { allPosts } from 'content-collections'
 
 ### 4.1. Подготовить новые секреты GitHub
 
-В **GitHub → Settings → Secrets and variables → Actions**:
+Workflow в `_BUILD/v3/templates/deploy-prod.yml.example` использует `environment: production` — поэтому секреты должны лежать **в Environment, а не в repo-level Secrets**, иначе job упадёт на `Setup SSH` с пустым `SSH_PRIVATE_KEY`.
 
-**Удалить старые** (если были):
+В **GitHub → Settings → Environments → создать `production`** (для dev-поддомена — отдельный environment `dev`):
+
+**Удалить старые** (если были на repo-level):
 - `DEPLOY_SSH_KEY` (старый из `~/.ssh/deploy_key` с VPS)
+- `SERVER_IP` (если был)
 
-**Добавить новые:**
+**Добавить в Environment `production` (Secrets):**
 - `SSH_PRIVATE_KEY` — приватный ключ из Mac (`~/.ssh/{site}-deploy`, см. ниже как сгенерировать)
 - `SSH_HOST` — IP VPS (если ещё не было)
 - `SSH_USER` — `deploy`
 - `SSH_PORT` — `2222` (или `22`)
 - `PROD_ENV_FILE` — содержимое локального `.env.production` целиком (multiline)
+
+**Repository-level Secrets** (используются в build job, до того как environment подтягивается):
 - `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_YM_ID`, `NEXT_PUBLIC_GA_ID` — публичные ID для билда
 
-**Variables:**
+**Repository-level Variables:**
 - `SITE_NAME` — kebab-case имя сайта (то же, что в `package.json#name` и в PM2)
 
 Сгенерировать новый SSH-ключ (на Mac):
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/{site}-deploy -N "" -C "{site}-deploy"
 # Публичную часть положить в authorized_keys deploy-юзера на VPS:
-cat ~/.ssh/{site}-deploy.pub | ssh deploy@{vps-ip} "tee -a ~/.ssh/authorized_keys"
-# Приватную часть загрузить в GitHub Secret:
-gh secret set SSH_PRIVATE_KEY < ~/.ssh/{site}-deploy
+ssh-copy-id -i ~/.ssh/{site}-deploy.pub -p {ssh-port} deploy@{vps-ip}
+# Приватную часть загрузить в GitHub Environment Secret (НЕ repo-level):
+gh secret set SSH_PRIVATE_KEY --env production --repo {owner}/{site} \
+  < ~/.ssh/{site}-deploy
+# Загрузить .env как multiline secret:
+gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} \
+  < ~/projects/{site}/.env.production
 # (опционально) удалить приватную часть с Mac:
 # rm ~/.ssh/{site}-deploy   ← только если уверен, что ключ загружен в GitHub
 ```
@@ -529,17 +538,31 @@ nano ~/.ssh/authorized_keys
 
 ### 4.4. Заменить `.github/workflows/deploy-prod.yml`
 
-Скопировать новый шаблон workflow из `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/01-bootstrap-refactor.md` (раздел Phase 5, Tasks 2) или из обновлённого bootstrap-репо (`specs/01b-server-handoff.md` после ТЗ-1).
+Канонический шаблон — `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/templates/deploy-prod.yml.example`. Скопировать целиком:
 
-Подставить специфику этого сайта:
-- `vars.SITE_NAME` = имя проекта
-- Прод-порт PM2 (`{site}-prod`) — без изменений
+```bash
+cp ~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/templates/deploy-prod.yml.example \
+   ~/projects/{site}/.github/workflows/deploy-prod.yml
+```
 
-Аналогично для `deploy-dev.yml`, если был.
+Менять в нём ничего не нужно — все per-site значения вынесены в Variables/Secrets:
+- `vars.SITE_NAME` уже задан как Repository Variable (см. § 4.1).
+- Прод-порт PM2 (`{site}-prod`) задаётся в `pm2 start --name`, имя приходит из `vars.SITE_NAME`.
+- SSH-параметры приходят из Environment `production` Secrets.
+
+Аналогично для `deploy-dev.yml`, если был — копировать `_BUILD/v3/templates/deploy-dev.yml.example` и убедиться, что в репо есть Environment `dev` с собственным `SSH_PRIVATE_KEY` и `DEV_ENV_FILE`.
 
 ### 4.5. Переписать локальный `scripts/rollback.sh`
 
-Заменить старую логику (git reset + npm ci + build) на симлинк-switch (см. шаблон в bootstrap `_BUILD/v3/01-bootstrap-refactor.md` Phase 5, Tasks 5).
+Готовая версия лежит в bootstrap-репо `~/ClaudeCode/web-dev-bootstrap/scripts/rollback.sh` (атомарный симлинк-switch вместо `git reset + rebuild`). Скопировать:
+
+```bash
+cp ~/ClaudeCode/web-dev-bootstrap/scripts/rollback.sh \
+   ~/projects/{site}/scripts/rollback.sh
+chmod +x ~/projects/{site}/scripts/rollback.sh
+```
+
+Сигнатура поменялась: было `scripts/rollback.sh <commit-hash> [site] [ssh_alias]`, стало `scripts/rollback.sh [site] [ssh_alias]` — скрипт сам находит предыдущий релиз в `~/prod/{site}/releases/`. Проверь, что в `~/.ssh/config` есть `Host {site}` (или передавай ssh_alias явно).
 
 ### 4.6. Тестовый деплой
 
@@ -620,18 +643,32 @@ cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/catchup.md .claude/commands/
 
 ## Этап 6: Caddy на VPS (опционально)
 
-Если хочешь перевести VPS с nginx на Caddy:
+Если на VPS до сих пор стоит nginx + certbot (т.е. VPS поднимался по bootstrap-vps.sh **до** v2.3-caddy) — переводи на Caddy. Если VPS свежий v2.3+, или ты уже мигрировал ранее — пропусти.
 
-⚠️ Это **общая инфраструктура** — затрагивает все сайты, живущие на этом VPS. Делать только когда все сайты на VPS уже мигрированы на v3 или готовы к миграции.
+⚠️ Это **общая инфраструктура** — затрагивает все сайты, живущие на этом VPS. Делать только когда все сайты на VPS уже мигрированы на v3 или готовы к миграции (потому что после переключения старые pull-based workflow продолжат работать, но если у них в `~/prod/{site}/.git` сидит старая версия конфига — могут быть нюансы).
+
+Не делай механический конвертер `nginx → Caddyfile` — структура и подходы разные. Используй готовый Caddy-шаблон.
 
 Шаги:
-1. Установить Caddy на VPS (см. https://caddyserver.com/docs/install)
-2. Сконвертировать nginx-конфиги в Caddyfile (по одному файлу на сайт в `/etc/caddy/Caddyfile.d/`). Шаблон — в `~/ClaudeCode/web-dev-bootstrap/docs/server-add-site.md` после ТЗ-1.
-3. `caddy validate --config /etc/caddy/Caddyfile`
-4. `systemctl stop nginx; systemctl disable nginx; systemctl start caddy`
-5. Проверить, что все сайты на VPS открываются с HTTPS (Caddy сам получит сертификаты при первом запросе на каждый домен).
 
-Если что-то пошло не так — `systemctl stop caddy; systemctl start nginx` обратно. Caddy и nginx на одних портах (80, 443), оба сразу не запустишь.
+1. **Установить Caddy.** Лучше всего — прогнать обновлённый `bootstrap-vps.sh` (он проверит, что Caddy установлен из cloudsmith-репо и базовый `/etc/caddy/Caddyfile` собран):
+   ```bash
+   ssh root@{vps-ip} 'CADDY_ADMIN_EMAIL=admin@example.com bash -s' \
+     < ~/ClaudeCode/web-dev-bootstrap/scripts/bootstrap-vps.sh
+   ```
+   Скрипт идемпотентен: уже установленные node/pm2/ufw не тронет, но добавит `caddy` и базовый Caddyfile с `import /etc/caddy/Caddyfile.d/*.caddy`.
+
+2. **Для каждого сайта на VPS** перепиши nginx-vhost в Caddy-блок по шаблону из `~/ClaudeCode/web-dev-bootstrap/docs/server-add-site.md` § 4 (`reverse_proxy localhost:{port}` + `encode gzip zstd` + `@static path` + `@html path`). Положи в `/etc/caddy/Caddyfile.d/{site}.caddy`. Бэкап старого vhost-конфига держи **вне** `Caddyfile.d/` — иначе `caddy validate` подхватит `*.bak` и упадёт.
+
+3. **Проверить:** `sudo caddy validate --config /etc/caddy/Caddyfile` — должно быть `Valid configuration`.
+
+4. **Переключить:** `sudo systemctl stop nginx && sudo systemctl disable nginx && sudo systemctl reload caddy`. Caddy и nginx слушают одни порты (80, 443) — параллельно не запустишь, надо остановить nginx до reload Caddy.
+
+5. **Проверить HTTPS на каждом домене:** Caddy сам получит сертификат при первом HTTPS-запросе (HTTP-01 challenge через 80 порт). Логи: `sudo journalctl -u caddy --since "5 min ago" | grep -i obtained`.
+
+6. **(Опционально) удалить certbot и его таймеры:** `sudo apt purge certbot python3-certbot-nginx; sudo systemctl disable --now certbot.timer 2>/dev/null || true`. Старые сертификаты в `/etc/letsencrypt/` можно оставить — Caddy их игнорирует, держит свои в `/var/lib/caddy/`.
+
+**Откат** (если что-то пошло не так): `sudo systemctl stop caddy && sudo systemctl start nginx`. Старые vhost-конфиги в `/etc/nginx/sites-enabled/` остались на месте, certbot-сертификаты в `/etc/letsencrypt/` — тоже. Сайты вернутся под старую инфру за секунды.
 
 ---
 
