@@ -110,9 +110,9 @@ fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /
 
 **Симптом:** `.next/server/app/uslugi/foo.html` существует, `curl` отдаёт 404 с `x-nextjs-prerender: 1`.
 
-**Причина:** `next start` читает route manifest при старте процесса. Сделали `npm run build`, но `pm2 restart` забыли — pm2 продолжает отдавать старый манифест.
+**Причина:** `next start` читает route manifest при старте процесса. Сделали `pnpm build`, но `pm2 restart` забыли — pm2 продолжает отдавать старый манифест.
 
-**Фикс:** деплой = **двухшаговый** всегда: `npm run build && pm2 restart {site}-prod --update-env`. Никогда только build.
+**Фикс:** деплой = **двухшаговый** всегда: `pnpm build && pm2 restart {site}-prod --update-env`. Никогда только build.
 
 **Диагностика:** если prod 404 на заведомо существующий файл в `.next/server/app/`, **первая гипотеза** — pm2 работает со старого билда. Проверка: сравнить `pm2 info {site}-prod` (uptime) и `stat -c '%y' .next/BUILD_ID` (mtime). Если build моложе uptime — нужен restart.
 
@@ -155,7 +155,7 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 gh auth status                # active = <owner>?
 git status                    # working tree clean?
 git log origin/main..HEAD     # что именно уезжает?
-npm run lint && npm run build # локально билд проходит?
+pnpm lint && pnpm build       # локально билд проходит?
 ```
 
 ## Откат прода

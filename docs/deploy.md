@@ -72,8 +72,8 @@ jobs:
           ssh -o StrictHostKeyChecking=no deploy@${{ secrets.SERVER_IP }} "
             cd ~/prod/${{ vars.SITE_NAME }} && \
             git pull origin main && \
-            npm ci && \
-            npm run build && \
+            pnpm install --frozen-lockfile && \
+            pnpm build && \
             pm2 restart ${{ vars.SITE_NAME }}-prod
           "
 ```
@@ -90,7 +90,7 @@ jobs:
 На Mac:
 ```bash
 cd ~/projects/{site}
-npm run dev                 # localhost:3000
+pnpm dev                    # localhost:3000
 # правим код через Claude Desktop
 git add -A && git commit -m "feat: ..."
 git push origin dev          # deploy-dev.yml → dev.domain.com
@@ -110,7 +110,7 @@ ssh deploy@{server-ip}
 cd ~/prod/{site}
 git log --oneline -5
 git reset --hard {commit-hash}
-npm ci && npm run build && pm2 restart {site}-prod
+pnpm install --frozen-lockfile && pnpm build && pm2 restart {site}-prod
 ```
 
 После успешного релиза полезно ставить тег `git tag stable-YYYY-MM-DD && git push --tags` — чтобы было откуда откатываться.

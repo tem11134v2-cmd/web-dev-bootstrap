@@ -34,7 +34,7 @@
 
 ### `format.sh` — PostToolUse (matcher: Edit|Write|MultiEdit) — был раньше
 
-Запускает `prettier --write` на каждый изменённый `.ts/.tsx/.js/.jsx/.mjs/.cjs/.json/.md/.mdx/.css` файл. Молча, без вывода. Если prettier не установлен — пропускает.
+Запускает `biome check --write` на каждый изменённый `.ts/.tsx/.js/.jsx/.mjs/.cjs/.json/.md/.mdx/.css` файл. Молча, без вывода. Если Biome не установлен (нет `node_modules/.bin/biome`) — пропускает.
 
 ## Скрипты (`scripts/`)
 
@@ -50,7 +50,7 @@
 
 ### `scripts/rollback.sh <commit-hash> [site] [ssh_alias]`
 
-Откатывает прод на VPS на указанный коммит: `git fetch && git reset --hard <hash> && npm ci && npm run build && pm2 restart`.
+Откатывает прод на VPS на указанный коммит: `git fetch && git reset --hard <hash> && pnpm install --frozen-lockfile && pnpm build && pm2 restart`.
 
 Спрашивает подтверждение `[y/N]` (это деструктивная операция — коммиты впереди `<hash>` на сервере становятся unreachable до следующего git fetch с GitHub).
 

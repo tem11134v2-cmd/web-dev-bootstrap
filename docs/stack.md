@@ -47,13 +47,13 @@
 npx create-next-app@latest project-name --typescript --tailwind --app --turbopack --no-eslint
 cd project-name
 npx shadcn@latest init
-npm install \
+pnpm add \
   react-hook-form @hookform/resolvers zod \
   sonner lucide-react \
   next-mdx-remote gray-matter \
   sharp clsx tailwind-merge class-variance-authority tw-animate-css
-npm install -D --save-exact @biomejs/biome
-npx biome init
+pnpm add -D --save-exact @biomejs/biome
+pnpm exec biome init
 ```
 
 Флаг `--no-eslint` нужен потому что мы заменили ESLint+Prettier на Biome (один бинарник, один конфиг, проще CI). Готовый шаблон `biome.json` лежит в корне bootstrap'а как `biome.json.example` — копируй и дорабатывай при необходимости. Дальнейшие шаги настройки (структура папок, tailwind.config, scripts) — см. `specs/02-project-init.md` и `specs/03-design-system.md`.
