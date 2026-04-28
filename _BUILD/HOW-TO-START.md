@@ -62,15 +62,18 @@ xcode-select --install
 
 Проверка: `brew --version`
 
-### 0.4. GitHub CLI (gh) + Node.js + pnpm
+### 0.4. GitHub CLI (gh) + mise (Node + pnpm)
 
 ```bash
-brew install gh node
-corepack enable
-corepack prepare pnpm@latest --activate
+brew install gh mise
+echo 'eval "$(mise activate zsh)"' >> ~/.zshrc
+source ~/.zshrc
+
+mise use --global node@22
+mise use --global pnpm@latest
 ```
 
-`corepack` идёт в комплекте с Node 16.13+, активирует pnpm одной командой — отдельный `brew install pnpm` не нужен.
+`mise` — единый менеджер версий: ставит и Node, и pnpm, и любой другой тул, который понадобится. В каждом проекте читает `.tool-versions` и подменяет версии под локальный проект автоматически — никакого `nvm use` руками.
 
 Проверка: `gh --version && node --version && pnpm --version`
 
@@ -82,7 +85,7 @@ v22.x.x         ← важно: 22 или новее (Next.js 16 требует)
 9.x.x           ← pnpm
 ```
 
-Если `node --version` показывает меньше `v22` — `brew upgrade node`.
+Если `node --version` показывает меньше `v22` — `mise use --global node@22` ещё раз (mise сам перекачает).
 
 ### 0.5. Git identity
 

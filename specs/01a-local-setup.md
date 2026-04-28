@@ -59,16 +59,17 @@ ssh -T git@github.com
 - Версии `node`, `pnpm`, ссылка на `.tool-versions` если есть.
 - Email в git.
 
-### 5. `.nvmrc` и lock-файл
+### 5. `.tool-versions` и lock-файл
 
 Создай в корне проекта:
 
 ```
-# .nvmrc
-22
+# .tool-versions
+node 22
+pnpm latest
 ```
 
-Это чтобы на VPS (у которого `nvm` может быть) и у других разработчиков совпадала версия Node.
+Это чтобы у других разработчиков и на VPS (через `mise install`) совпадали версии Node и pnpm. `mise` автоматически читает этот файл и подменяет версии при `cd` в папку.
 
 Lock-файл (`pnpm-lock.yaml`) появится в спеке `02-project-init` после `create-next-app` и первого `pnpm install`. Обязательно коммить его — GitHub Actions использует `pnpm install --frozen-lockfile`.
 
@@ -83,7 +84,7 @@ Lock-файл (`pnpm-lock.yaml`) появится в спеке `02-project-init
 - Все команды из п. 1 проходят.
 - `git config` заполнен, `ssh -T git@github.com` приветствует.
 - `.claude/memory/references.md` обновлён.
-- `.nvmrc` создан, закоммичен.
+- `.tool-versions` создан, закоммичен.
 
 ## Memory updates
 
