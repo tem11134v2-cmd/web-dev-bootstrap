@@ -41,21 +41,24 @@
    Скопировать содержимое `biome.json.example` из bootstrap-репо в `biome.json` проекта (или адаптировать сгенерированный). Ключевые настройки: `linter.recommended + a11y.recommended`, `formatter.lineWidth: 100`, `quoteStyle: single`, `semicolons: asNeeded`, `useSortedClasses` для Tailwind. После — прогнать `pnpm exec biome check --write` один раз, чтобы привести create-next-app файлы к формату.
 
    `schema-dts` даёт типы для JSON-LD (`WithContext<Service>`, `WithContext<BreadcrumbList>` и т.д.) — используются в `lib/schema.ts` начиная со спеки 05. Без них опечатка в `@type` ловится только Yandex Validator-ом на проде.
-6. Настроить `next.config.ts` (без standalone — см. `docs/stack.md`):
+6. Настроить `next.config.ts` (со standalone-сборкой для push-based deploy — см. `docs/deploy.md`):
    ```typescript
    const nextConfig = {
+     output: 'standalone', // компактный артефакт .next/standalone/server.js для rsync на VPS
      compress: false, // сжатие делает Caddy (encode gzip zstd в шаблоне server-add-site)
+     reactStrictMode: true,
      images: {
        formats: ['image/avif', 'image/webp'],
        deviceSizes: [640, 750, 828, 1080, 1200, 1920],
        minimumCacheTTL: 60 * 60 * 24 * 365,
      },
-     reactStrictMode: true,
      experimental: {
        ppr: 'incremental', // Partial Prerendering — опт-ин per-route через `export const experimental_ppr = true`
      },
    }
    ```
+   `output: 'standalone'` собирает минимально-достаточный сервер в `.next/standalone/` (со встроенными зависимостями) — артефакт ~30 MB rsync-ится на VPS вместо тяжёлых `node_modules`. На проде PM2 запускает `node current/server.js`, а не `next start`. Подробности — `docs/deploy.md`.
+
    `experimental.ppr: 'incremental'` оставляет дефолтный SSG для всех роутов и активирует PPR только там, где явно прописано `experimental_ppr = true` в page.tsx. Подробнее когда применять — `docs/architecture.md` § «Partial Prerendering». Если PPR в проекте не пригодится — флаг можно убрать без последствий.
 7. Настроить `package.json` scripts (dev на Mac и prod на VPS используют один порт 3000; на VPS фактический порт передаётся через переменную `PORT` при `pm2 start`):
    ```json
@@ -102,7 +105,7 @@
 - `pnpm dev` запускает сервер на порту 3000 без ошибок
 - Все папки структуры созданы
 - shadcn/ui компоненты установлены, Tailwind работает (проверка: `<Button>` рендерится со стилями)
-- `next.config.ts` содержит настройку изображений и `compress: false`
+- `next.config.ts` содержит `output: 'standalone'`, `compress: false` и настройку изображений
 - `biome.json` существует в корне; `pnpm lint` и `pnpm format` отрабатывают без падений; в `package.json` нет ESLint/Prettier-зависимостей
 - `CLAUDE.md` в корне проекта, секция `Project:` заполнена
 - Первый коммит создан
