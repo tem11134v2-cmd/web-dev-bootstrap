@@ -10,6 +10,10 @@ cd "$root" || exit 0
 # Skip if not a git repo.
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
+# Record HEAD at session start so stop-reminder.sh can detect commits made this session.
+# Per-PPID isolates parallel Claude instances on the same Mac.
+git rev-parse HEAD 2>/dev/null > "/tmp/.claude-session-start-sha-$PPID" 2>/dev/null || true
+
 warnings=()
 
 # 1. Branch behind upstream
