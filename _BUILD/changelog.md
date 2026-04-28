@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.3-caddy — 2026-04-28 · Caddy вместо nginx+certbot
+
+Фаза 1 рефакторинга `_BUILD/v3/01-bootstrap-refactor.md`. Заменили связку `nginx + certbot + cron renewal` на **Caddy** — встроенный ACME (Let's Encrypt + ZeroSSL fallback), автоматический HTTPS, multi-site через `import /etc/caddy/Caddyfile.d/*.caddy`. ~30 строк nginx-конфига на сайт превратились в ~6 строк Caddyfile, ручной certbot и его системный таймер больше не нужны.
+
+- **`scripts/bootstrap-vps.sh`** — apt-репо Caddy (cloudsmith) с GPG-ключом, `apt install caddy` вместо `nginx + certbot + python3-certbot-nginx`. Базовый `/etc/caddy/Caddyfile` с глобальным `email` + `import Caddyfile.d/*.caddy`. Папка `/etc/caddy/Caddyfile.d/` создаётся пустой с `00-placeholder.caddy` на `:8080`, чтобы `caddy validate` не падал на пустом glob'е до первого сайта. `caddy validate` перед `systemctl reload caddy`. Параметр `CADDY_ADMIN_EMAIL` — обязательный (без email ACME у Caddy не работает).
+- **`docs/server-manual-setup.md`** — шаги 5 и 8 переписаны под Caddy. Команды запуска передают `CADDY_ADMIN_EMAIL` через env. Верификация: `caddy validate` + `systemctl is-active caddy`. Раздел «Обслуживание» — `journalctl -u caddy` для аудита SSL-ошибок вместо `certbot certificates`. Добавлены частые проблемы: placeholder `:8080`, ACME не выпускается (DNS / ufw).
+- **`docs/server-add-site.md`** — полностью переписан § «положить конфиг» под Caddy: один файл на сайт в `/etc/caddy/Caddyfile.d/{site}.caddy`, шаблон с `reverse_proxy` + `encode gzip zstd` + `Cache-Control` (immutable 1y для статики, must-revalidate для HTML), опциональный dev-поддомен с `basicauth`. Удаление `00-placeholder.caddy` при первом сайте. § SSL: ничего делать не нужно — Caddy сам пройдёт HTTP-01 challenge при первом запросе. § Автопродление: Caddy за 30 дней до истечения, без cron.
+- **`docs/server-multisite.md`** — multi-site через `Caddyfile.d/*.caddy` вместо `sites-available/sites-enabled`-symlink'ов. SSL-лимит Let's Encrypt — упомянут ZeroSSL fallback и DNS-01 wildcard через Caddy plugin.
+- **`docs/deploy.md`** — ASCII-схема: «nginx + SSL» → «Caddy + ACME». Cloudflare-секция: добавлен подводный камень с HTTP-01 через CF proxy и обходные пути (DNS-01 через `caddy-dns/cloudflare` plugin), `trusted_proxies cloudflare` для логов реального IP.
+- **`docs/troubleshooting.md`** — добавлены два раздела. «Caddy не стартует / падает после правки» — диагностика `systemctl status` + `journalctl` + `caddy validate`, типичные причины (typo, port conflict со старым nginx, права на `/var/lib/caddy`). «SSL не выписывается (Caddy)» — четыре причины по частоте (DNS, ufw 80, CF proxy, Let's Encrypt rate limit). Анти-совет: не делать `systemctl restart caddy` при ACME-проблемах, чтобы не сбить экспоненциальный бэкофф.
+- **`specs/12-handoff.md`** — в runbook'е «SSL-сертификат истёк» команды `certbot renew` + `systemctl reload nginx` заменены на диагностику Caddy. В «Раз в месяц» — `systemctl status caddy` вместо `certbot certificates`.
+
+7 атомарных коммитов в ветке `feat/v2.3-caddy`. Сам bootstrap-репо ничего не билдит — изменения проявятся только при следующем запуске `bootstrap-vps.sh` на свежем VPS или при миграции существующего (см. `_BUILD/v3/02-migrate-existing-project.md` § «nginx → Caddy»). Существующие prod-VPS на nginx+certbot продолжают работать как раньше — миграция точечная.
+
+**Out of scope этой фазы (~15 файлов):** упоминания nginx/certbot в `CLAUDE.md` (stack-строка), `README.md`, `docs/INDEX.md`, `docs/performance.md` (nginx gzip/brotli раздел), `docs/seo.md`, `docs/domain-connect.md`, `scripts/README.md`, `_BUILD/claude-md-template.md`, `specs/01b-server-handoff.md` (генерация nginx.conf.example), `specs/02-project-init.md`, `specs/08-seo-schema.md`, `specs/11-performance.md`, `specs/14-migrate.md`, `specs/optional/*`, `.claude/memory/references.md`. Часть из этого — описания, которые не ломаются от устаревания (стек указан кратко, можно перечитать), часть — отдельные крупные правки (`01b` фактически меняет генерируемый артефакт). Всё это идёт следующими фазами или отдельным P1-bundle'ом.
+
 ## v2.2.2 — 2026-04-28 · P0 hotfix bundle
 
 Фаза 0 рефакторинга `_BUILD/v3/01-bootstrap-refactor.md`. 12 точечных правок поверх v2.2.1, без архитектурных изменений — закрываем накопившиеся противоречия и битые ссылки перед переходом на v3.0.
