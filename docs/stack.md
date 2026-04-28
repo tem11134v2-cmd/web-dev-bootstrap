@@ -63,14 +63,13 @@ npm install \
 {
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build && npm run compress",
+    "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint",
-    "compress": "node scripts/compress-images.mjs"
+    "lint": "next lint"
   }
 }
 ```
 
 - `dev` на Mac по умолчанию на `localhost:3000` (совпадает с портом прода на VPS — так меньше путаницы при проверке URL-ов).
 - На VPS порт prod-процесса выбирается из реестра (`docs/server-multisite.md`) — обычно 3000/3010/3020 — и прописывается в PM2-команде `PORT=3010 pm2 start npm --name {site}-prod -- start`, а не в `package.json`. Скрипт `start` остаётся как fallback.
-- `compress` запускается после `build` — серверная оптимизация изображений в `public/` через sharp.
+- Растровые картинки в `public/` оптимизирует `next/image` на лету (sharp идёт как `optionalDependency` Next.js 15+ и подключается автоматически). Постбилд-шага сжатия нет.

@@ -35,7 +35,7 @@ project/
 ├── data/                       # Fallback (leads.json)
 ├── docs/                       # KB (эти файлы)
 ├── specs/                      # Спецификации задач
-├── scripts/                    # Build-time скрипты (compress-images.mjs)
+├── scripts/                    # Серверные shell-скрипты (bootstrap-vps, sync-env, rollback)
 └── CLAUDE.md
 ```
 

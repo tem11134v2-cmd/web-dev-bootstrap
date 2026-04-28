@@ -118,7 +118,6 @@ npm run dev      — dev server (port 3000, локально на Mac)
 npm run build    — production build (собирается на VPS после git pull)
 npm run start    — prod server (порт передаётся через PORT=... при pm2 start)
 npm run lint     — linting
-npm run compress — sharp image optimization
 ```
 
 ## Testing
