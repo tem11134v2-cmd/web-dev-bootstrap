@@ -55,8 +55,8 @@ Deploy: git push → GitHub Actions → PM2 + Caddy (встроенный ACME) 
 
 - **Session start:** `git fetch origin`, check if branch is behind upstream, offer `git pull`. After pull — re-read `.claude/memory/INDEX.md`. Hook `.claude/hooks/session-start.sh` does this automatically at the start of every session.
 - **Before any `git push` / `gh repo` / `gh pr` command:** verify `gh auth status` active account matches the repo owner from `git remote get-url origin`. On mismatch: `gh auth switch -h github.com -u <owner>`. Hook `.claude/hooks/before-push.sh` blocks Claude-side pushes on mismatch (exit 2). Caveat: catches only Claude-side commands, not terminal pushes.
-- **Secrets:** `.env*` (except `.env.example`) — never commit. To deploy secrets to VPS: `scripts/sync-env.sh` (reads `~/projects/{site}/.env.production`, scp + `pm2 restart --update-env`).
-- **Rollback prod:** `scripts/rollback.sh <commit-hash>` — rolls prod back on the VPS (git reset + `pnpm install --frozen-lockfile` + build + pm2 restart). Then on Mac: `git revert <bad-commit> && git push origin main` — Actions redeploys the fix. For merge commits use `git revert -m 1 <hash>`.
+- **Secrets:** `.env*` (except `.env.example`) — never commit. Production secrets live in GitHub Environment `production` (single multiline secret `PROD_ENV_FILE` = full `.env.production`); the deploy workflow writes them into `releases/<sha>/.env` on every push. Update via `gh secret set --env production PROD_ENV_FILE < ~/projects/{site}/.env.production`. Fallback when Actions are down: `scripts/sync-env.sh` patches `current/.env` directly.
+- **Rollback prod:** `scripts/rollback.sh` — atomic switch of `~/prod/{site}/current` symlink back to the previous release in `releases/<previous-sha>/` + `pm2 reload`. Milliseconds, no rebuild. Then on Mac: `git revert <bad-commit> && git push origin main` — Actions builds and rsyncs a fresh release. For merge commits use `git revert -m 1 <hash>`.
 
 ## Memory triggers (when to update .claude/memory/)
 

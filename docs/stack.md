@@ -31,9 +31,9 @@
 
 ## Почему этот стек
 
-**Next.js 16 App Router.** Server Components по умолчанию (меньше клиентского JS), вложенные layouts, встроенная оптимизация (images, fonts, scripts), ISR/SSG из коробки, API routes для форм. Turbopack для быстрой dev-сборки.
+**Next.js 16 App Router.** Server Components по умолчанию (меньше клиентского JS), вложенные layouts, встроенная оптимизация (images, fonts, scripts), ISR/SSG из коробки, Server Actions для форм. Turbopack для быстрой dev-сборки.
 
-> **Почему без `output: "standalone"`.** Standalone собирает минимальный сервер в `.next/standalone/` для случаев, когда билд едет в Docker-образ или CI доставляет артефакт. У нас билд собирается прямо на VPS после `git pull`, PM2 запускает `next start` — standalone в этой схеме просто лишний артефакт. Если проект вырастет до Docker/отдельной build-ноды — включим тогда.
+> **`output: 'standalone'`.** Билд собирается на GitHub-runner и доставляется на VPS через `rsync` (push-based deploy, см. `docs/deploy.md`). Standalone-режим выкладывает минимально-достаточный сервер в `.next/standalone/server.js` со встроенными зависимостями — артефакт компактный (~30 MB вместо `node_modules` целиком), VPS-у не нужен Node toolchain (только runtime + `pm2`). PM2 на проде запускает `node current/server.js`, а не `next start`.
 
 **Tailwind v4.** Zero-config, быстрее v3, конфиг в CSS (`@theme`). Никакого custom CSS — только утилиты.
 
@@ -78,6 +78,6 @@ MDX-стек (`content-collections` + `@content-collections/core` + `@content-co
 ```
 
 - `dev` на Mac по умолчанию на `localhost:3000` (совпадает с портом прода на VPS — так меньше путаницы при проверке URL-ов).
-- На VPS порт prod-процесса выбирается из реестра (`docs/server-multisite.md`) — обычно 3000/3010/3020 — и прописывается в PM2-команде `PORT=3010 pm2 start npm --name {site}-prod -- start`, а не в `package.json`. Скрипт `start` остаётся как fallback.
+- На VPS порт prod-процесса выбирается из реестра (`docs/server-multisite.md`) — обычно 3000/3010/3020 — и прописывается в PM2-команде `PORT=3010 pm2 start /home/deploy/prod/{site}/current/server.js --name {site}-prod`, а не в `package.json`. Под push-based deploy PM2 запускает не `next start`, а напрямую `server.js` из standalone-сборки. Скрипт `start` в `package.json` остаётся как локальный fallback.
 - Растровые картинки в `public/` оптимизирует `next/image` на лету (sharp идёт как `optionalDependency` Next.js 15+ и подключается автоматически). Постбилд-шага сжатия нет.
 - `lint` и `format` идут через Biome — он же делает сортировку Tailwind-классов (правило `useSortedClasses`), поэтому `prettier-plugin-tailwindcss` не нужен. `typecheck` отделён от `lint`, потому что Biome не делает type-checking — это всегда `tsc`.

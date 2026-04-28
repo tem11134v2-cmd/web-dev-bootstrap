@@ -68,32 +68,38 @@ Core Web Vitals в зелёной зоне: **LCP < 2.5s, CLS < 0.1, INP < 200ms
 
 ## 6. Сжатие на сервере
 
-**В `next.config.ts`:** `compress: false` — отдай сжатие nginx (C быстрее и кэширует результат).
+**В `next.config.ts`:** `compress: false` — отдай сжатие Caddy (C быстрее, поддерживает zstd, кэширует результат).
 
-**Nginx — gzip + статические `.gz`:**
-```nginx
-gzip on; gzip_vary on; gzip_proxied any; gzip_comp_level 5;
-gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml font/woff2;
-gzip_static on;  # отдаёт предсжатые .gz
+**Caddy — `encode` директива в site-блоке:**
+```caddyfile
+{domain}, www.{domain} {
+    reverse_proxy localhost:{prod-port}
+    encode gzip zstd     # zstd для современных браузеров (Chrome 123+, Firefox 126+), gzip как fallback
+}
 ```
 
-`gzip on` обрабатывает динамические ответы (HTML, JSON). `gzip_static on` отдаёт предсжатые `.gz`, если они лежат рядом с файлом — но никакого постбилд-шага сжатия в шаблоне нет, эта настройка просто включает поддержку, если позже понадобится.
+Это уже включено в шаблоне `docs/server-add-site.md` § 4. Caddy сам выбирает формат по `Accept-Encoding` клиента и кэширует сжатые ответы в памяти. **brotli** в Caddy с коробки нет (нужен `xcaddy build` с плагином `caddy-encode-brotli`), но zstd обычно даёт сопоставимый или лучший результат и поддерживается шире, поэтому brotli обычно не нужен.
 
-**Brotli** даёт +10–15% к gzip, но требует PPA / compile-from-source. На общих VPS — gzip достаточен. Не сжимать: WebP, AVIF, JPEG, PNG, woff2 (уже сжаты).
+Не сжимать: WebP, AVIF, JPEG, PNG, woff2 (уже сжаты). Caddy `encode` сам пропускает их по типу контента.
 
 ## 7. Кэширование
 
-```nginx
-# Статика — immutable (Next.js добавляет хэши в имена)
-location ~* \.(js|css|woff2|png|jpg|webp|avif|svg|ico)$ {
-    expires 365d;
-    add_header Cache-Control "public, max-age=31536000, immutable";
-}
-# HTML — revalidate
-location ~* \.html$ {
-    add_header Cache-Control "public, max-age=0, must-revalidate";
+```caddyfile
+{domain}, www.{domain} {
+    reverse_proxy localhost:{prod-port}
+    encode gzip zstd
+
+    # Статика — immutable (Next.js добавляет хэши в имена)
+    @static path *.css *.js *.woff2 *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    # HTML — revalidate
+    @html path / *.html
+    header @html Cache-Control "public, max-age=0, must-revalidate"
 }
 ```
+
+Этот блок уже в шаблоне `docs/server-add-site.md` § 4 — добавлять не надо, проверить можно через `curl -I https://{domain}/_next/static/...` (должен быть `Cache-Control: public, max-age=31536000, immutable`).
 
 ISR в Next.js = серверный кэш с автоматической ревалидацией. Redis для тяжёлых API/БД.
 
@@ -131,22 +137,34 @@ export async function HeavyServerSection({ slug }: { slug: string }) {
 
 > **Важно про конфиг.** В Next.js 16 директива `use cache` требует включения через `experimental.useCache: true` в `next.config.ts` (на момент 16.0). Уточняй актуальный статус в [docs](https://nextjs.org/docs/app/api-reference/directives/use-cache) — фича выходит из experimental постепенно.
 
-## 8. Серверная оптимизация (nginx)
+## 8. Серверная оптимизация (Caddy)
 
-```nginx
-listen 443 ssl http2;
-ssl_protocols TLSv1.2 TLSv1.3;
-ssl_session_cache shared:SSL:10m;
-ssl_session_timeout 1d;
-ssl_stapling on; ssl_stapling_verify on;
-keepalive_timeout 65; keepalive_requests 100;
+Caddy с коробки делает большую часть того, что в nginx нужно прописывать вручную:
+
+| Что | Как в Caddy |
+|---|---|
+| HTTP/2 | Включён по умолчанию для HTTPS-сайтов |
+| HTTP/3 (QUIC) | Включён по умолчанию начиная с Caddy 2.6 |
+| TLS 1.3 | Дефолт; TLS 1.0/1.1 отключены |
+| OCSP stapling | Включён автоматически для всех Caddy-выписанных сертификатов |
+| SSL session resumption | Включено |
+| Auto-renewal SSL | За 30 дней до истечения, без cron |
+
+Проверить активные параметры на проде:
+```bash
+ssh deploy@{ip} 'sudo journalctl -u caddy --since "1 day ago" | grep -iE "tls handshake|http3" | head -5'
+curl -I --http3 https://{domain}                      # должен открыться по HTTP/3
+nmap --script ssl-enum-ciphers -p 443 {domain} | head # cipher suites
 ```
+
+Кастомизировать почти ничего не нужно. Если включаешь Cloudflare proxy — добавь `trusted_proxies cloudflare` в site-блок (см. `docs/deploy.md` § Cloudflare), чтобы реальный IP клиента попадал в логи.
 
 ## 9. `next.config.ts`
 
 ```typescript
 const nextConfig = {
-  compress: false,                // сжатие — на nginx
+  output: 'standalone',           // компактный артефакт для push-based deploy (см. docs/deploy.md)
+  compress: false,                // сжатие — на Caddy (encode gzip zstd)
   reactStrictMode: true,
   images: {
     formats: ["image/avif", "image/webp"],
@@ -217,7 +235,7 @@ npx sharp-cli --input "public/**/*.{jpg,jpeg,png}" --output public/ --mozjpeg --
 
 **Safety net для рискованных аудитов:**
 - `git tag pre-spec-N` перед правками.
-- Backup nginx-конфига **вне** `sites-enabled/` (бэкап внутри парсится → `conflicting server_name`).
+- Backup Caddy-конфига **вне** `/etc/caddy/Caddyfile.d/` (`Caddyfile` парсит весь glob; бэкап `*.caddy.bak` или `*.caddy.old` рядом — словит `caddy validate` ошибку). Кладите бэкапы в `/home/deploy/caddy-backups/` или другую папку, не входящую в импорт.
 - Тестовый Next prod на свободном порту перед редеплоем основного.
 
 ## 14. Бюджет производительности
@@ -236,6 +254,6 @@ npx sharp-cli --input "public/**/*.{jpg,jpeg,png}" --output public/ --mozjpeg --
 
 **Изображения/шрифты:** sharp-сжатие, WebP/AVIF, `next/image` везде, lazy ниже fold, `priority`+`fetchpriority="high"` на LCP, woff2 локально, `font-display: swap`, preload критичных, явные размеры/aspect-ratio.
 **JS/CSS:** purged Tailwind, code splitting, dynamic для тяжёлого, third-party скрипты `lazyOnload`/по событию, long tasks < 50ms, bundle analyzer проверен, `console.log` удалены, анимации только `transform`/`opacity`, `content-visibility: auto` ниже fold.
-**Сервер:** gzip + `gzip_static`, immutable на статику, revalidate на HTML, HTTP/2, TLS 1.3, OCSP stapling, preconnect для внешних доменов.
+**Сервер:** Caddy `encode gzip zstd`, immutable на статику, revalidate на HTML, HTTP/2 + HTTP/3, TLS 1.3, OCSP stapling — всё включено по умолчанию через шаблон `docs/server-add-site.md` § 4. Preconnect для внешних доменов в `<head>`.
 **A11y/UX:** WCAG AA контрастность (4.5:1 / 3:1), `h1→h2→h3` без пропусков, ScrollToTop, нет 404 в RSC-prefetch, `loading.tsx` удалён если не нужен.
 **Финальная проверка:** LCP breakdown изучен, PageSpeed Insights — зелёная зона (медиана из 3–5 замеров).

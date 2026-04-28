@@ -24,12 +24,12 @@
 | 2 | SSH hardening через drop-in `/etc/ssh/sshd_config.d/99-hardening.conf`: `Port 2222` (nonstandard — режет фоновый брутфорс), `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`. Нейтрализует конфликтующий `50-cloud-init.conf` (на Timeweb/Hetzner там `PasswordAuthentication yes`), комментирует `PermitRootLogin yes` в основном конфиге, переключает с `ssh.socket` на `ssh.service` (иначе Port из конфига игнорируется). `sshd -t` + `systemctl restart ssh.service`. |
 | 3 | UFW: deny incoming / allow outgoing / allow `SSH_PORT`, 80, 443. `ufw --force enable`. Устанавливает fail2ban (строгий jail.local: 3 попытки / 10 мин / 24 ч бан, `backend=systemd` для Ubuntu 24.04) и `unattended-upgrades` (security-only patches, без авто-reboot). |
 | 4 | Swap 2GB через `fallocate`, записывает в `/etc/fstab`. Критично на VPS с ≤4 GB RAM — билд Next.js иначе падает в OOM. |
-| 5 | Node.js 22 из NodeSource, Caddy (из официального apt-репо cloudsmith), git, PM2 глобально. |
+| 5 | Node.js 22 (runtime) из NodeSource, Caddy (из официального apt-репо cloudsmith), PM2 глобально через npm. **Под push-based deploy на VPS не ставится ни pnpm, ни git** — билд идёт на GitHub-runner, артефакт rsync-ится сюда; standalone-сборка Next привозит свои `node_modules` внутри. |
 | 6 | Папки `~/prod`, `~/dev` под deploy. Создаёт `~/ports.md` с шаблоном реестра (правило `prod = 3000 + N*10`, `dev = prod + 1000`). |
-| 7 | Генерит deploy-ключ `~/.ssh/deploy_key` (ed25519) для GitHub Actions, публичную половину дописывает в `~/.ssh/authorized_keys` самого же deploy (чтобы Actions мог ходить на себя), дедуп через `sort -u`. |
-| 8 | Кладёт базовый `/etc/caddy/Caddyfile` (глобальный `email` + `import /etc/caddy/Caddyfile.d/*.caddy`), создаёт пустую папку `/etc/caddy/Caddyfile.d/` с placeholder-блоком на `:8080`, проверяет `caddy validate`, `systemctl enable --now caddy`. |
+| 7 | Кладёт базовый `/etc/caddy/Caddyfile` (глобальный `email` + `import /etc/caddy/Caddyfile.d/*.caddy`), создаёт пустую папку `/etc/caddy/Caddyfile.d/` с placeholder-блоком на `:8080`, проверяет `caddy validate`, `systemctl enable --now caddy`. |
 
 **Чего скрипт НЕ делает:**
+- **Не генерирует SSH-ключ для GitHub Actions.** Под push-based deploy (v3.0-deploy) приватный ключ живёт **только** в GitHub Secrets, а не на VPS. Ключ генерируется на Mac разработчика в `spec 01b-server-handoff.md` (`ssh-keygen -t ed25519 -f ~/.ssh/{site}-deploy`); приватный загружается в GitHub (`gh secret set SSH_PRIVATE_KEY < ~/.ssh/{site}-deploy`), а публичная часть докладывается в `/home/deploy/.ssh/authorized_keys` через `ssh-copy-id` или вручную. На VPS приватного ключа нет ни в каком виде.
 - **Не включает `pm2-deploy` systemd-сервис.** Сервис `pm2 startup` требует непустого dump; если вызвать `systemctl enable --now pm2-deploy` без запущенных приложений — systemd видит, что pm2 сразу вышел, и помечает unit как `failed (Result: protocol)`. Включаем сервис в `server-add-site.md` после первого `pm2 save` с реальным процессом.
 - **Не выпускает SSL.** SSL выпускает Caddy автоматически при первом запросе на домен — но это происходит только когда в `Caddyfile.d/` появляется per-site конфиг (`server-add-site.md`). До первого сайта SSL негде выписывать.
 - **Не ставит пароль для `deploy`.** Пароль не нужен: sudo через NOPASSWD, логин по SSH-ключу. Если когда-нибудь понадобится консольный вход через панель провайдера — задать руками: `sudo passwd deploy`.
@@ -98,10 +98,13 @@ echo "== Firewall =="; sudo ufw status verbose | head -10
 echo "== fail2ban =="; sudo systemctl is-active fail2ban
 echo "== Swap =="; swapon --show
 echo "== Stack =="; node -v; caddy version; pm2 --version
+echo "== No build toolchain (push-based) =="; \
+  command -v pnpm >/dev/null && echo "WARN: pnpm установлен (под push-deploy не нужен)" || echo "pnpm: not installed (OK)"; \
+  command -v git  >/dev/null && echo "WARN: git установлен (под push-deploy не нужен)"  || echo "git: not installed (OK)"
 echo "== Caddy =="; systemctl is-active caddy; sudo caddy validate --config /etc/caddy/Caddyfile && echo "Caddyfile valid"
 echo "== Caddyfile.d =="; ls /etc/caddy/Caddyfile.d/
 echo "== Folders =="; ls -ld ~/prod ~/dev; [ -f ~/ports.md ] && echo "ports.md OK"
-echo "== Deploy key (public, уже в authorized_keys) =="; cat ~/.ssh/deploy_key.pub
+echo "== authorized_keys (deploy-юзер) =="; wc -l ~/.ssh/authorized_keys
 EOF
 ```
 
@@ -113,7 +116,8 @@ EOF
 - Node `v22.x`, Caddy `2.x`, pm2 `6.x`.
 - Caddy active, `Caddyfile valid`, в `Caddyfile.d/` лежит `00-placeholder.caddy` (заменится на per-site конфиг при первом сайте).
 - `~/prod`, `~/dev`, `~/ports.md` на месте.
-- `~/.ssh/deploy_key.pub` выводится (эту строку положим в GitHub Secrets при первом сайте).
+- `pnpm` и `git` не установлены — это **штатно** под push-based deploy (билд на runner, артефакт rsync-ится). Если они стоят с прошлого pre-v3 bootstrap'а — оставь, мешать не будут, но и не нужны.
+- `~/.ssh/authorized_keys` существует и содержит как минимум публичный ключ разработчика. Single-purpose deploy-ключ из spec 01b добавляется к нему отдельным шагом (см. `server-add-site.md`).
 
 ## Частые проблемы (для Claude при запуске)
 

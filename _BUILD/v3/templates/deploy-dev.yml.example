@@ -1,0 +1,125 @@
+# Шаблон GitHub Actions workflow для push-based deploy dev-поддомена.
+#
+# Аналогичен deploy-prod.yml.example, но:
+#   - триггер на ветке dev, не main
+#   - окружение GitHub Environment "dev" (отдельные secrets от production)
+#   - папка на VPS /home/deploy/dev/{site}/, PM2-процесс {site}-dev
+#   - basicauth + noindex настраиваются на уровне Caddy (см. docs/server-add-site.md)
+#
+# Использовать только если в docs/pages.md явно запрошен dev-поддомен (preview).
+# Если dev-поддомен не нужен — этот файл не создавать.
+
+name: Deploy dev
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev-${{ vars.SITE_NAME }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build standalone artifact (dev)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          # Для dev обычно используются те же NEXT_PUBLIC_* что и в prod, чтобы
+          # тестировать аналитику в реальной конфигурации. Если нужно изолировать
+          # счётчики — заведи отдельные NEXT_PUBLIC_*_DEV в environment "dev".
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_YM_ID: ${{ secrets.NEXT_PUBLIC_YM_ID }}
+          NEXT_PUBLIC_GA_ID: ${{ secrets.NEXT_PUBLIC_GA_ID }}
+
+      - name: Pack standalone bundle
+        run: |
+          mkdir -p deploy/.next
+          cp -r .next/standalone/. deploy/
+          cp -r .next/static deploy/.next/static
+          cp -r public deploy/public
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-dev
+          path: deploy
+          retention-days: 3
+          if-no-files-found: error
+
+  deploy:
+    name: Rsync to dev and switch symlink
+    needs: build
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-dev
+          path: deploy
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} -H ${{ secrets.SSH_HOST }} \
+            >> ~/.ssh/known_hosts
+
+      - name: Rsync to release dir
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          RELEASE_DIR: /home/deploy/dev/${{ vars.SITE_NAME }}/releases/${{ github.sha }}
+        run: |
+          $SSH $TARGET "mkdir -p $RELEASE_DIR"
+          rsync -az --delete -e "$SSH" deploy/ $TARGET:$RELEASE_DIR/
+
+      - name: Push .env from secrets
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          ENV_FILE: /home/deploy/dev/${{ vars.SITE_NAME }}/releases/${{ github.sha }}/.env
+        run: |
+          $SSH $TARGET "cat > $ENV_FILE && chmod 600 $ENV_FILE" <<'EOF'
+          ${{ secrets.DEV_ENV_FILE }}
+          EOF
+
+      - name: Activate release (atomic symlink switch)
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          SITE_DIR: /home/deploy/dev/${{ vars.SITE_NAME }}
+          SHA: ${{ github.sha }}
+          PM2_NAME: ${{ vars.SITE_NAME }}-dev
+        run: |
+          $SSH $TARGET "set -e; \
+            ln -sfn $SITE_DIR/releases/$SHA $SITE_DIR/current; \
+            pm2 reload $PM2_NAME --update-env || \
+              pm2 start $SITE_DIR/current/server.js --name $PM2_NAME --update-env; \
+            pm2 save"
+
+      - name: Cleanup old releases (keep last 3)
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          RELEASES_DIR: /home/deploy/dev/${{ vars.SITE_NAME }}/releases
+        run: |
+          $SSH $TARGET "cd $RELEASES_DIR && ls -1tr | head -n -3 | xargs -r rm -rf"
