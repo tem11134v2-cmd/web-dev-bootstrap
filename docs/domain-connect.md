@@ -32,8 +32,8 @@
 
 1. Заведи сайт в Cloudflare → получи два их NS-сервера.
 2. У регистратора поменяй NS-серверы домена на cloudflare-ские. Подожди 1–24 часа (обычно 10 минут).
-3. В Cloudflare → DNS → добавь те же A-записи что в варианте A. **Прокси (оранжевое облачко) на `@` и `www` включен**; на `dev` обычно **отключен (серое облачко, DNS only)** — чтобы certbot мог выпустить сертификат по HTTP-challenge.
-4. SSL/TLS → **Full (strict)** после того, как ты выпустишь Let's Encrypt на VPS (см. `docs/server-add-site.md` § 5).
+3. В Cloudflare → DNS → добавь те же A-записи что в варианте A. На время первого выпуска сертификата Caddy'ем **включи DNS-only (серое облачко) на `@` и `www`** — иначе CF перехватит HTTP-01 challenge на `/.well-known/acme-challenge/` и выпуск зациклится. После того как `journalctl -u caddy | grep "certificate obtained"` покажет успех — можно вернуть оранжевое облачко (proxy). На `dev` обычно держат серое облачко всегда.
+4. SSL/TLS → **Full (strict)** после того, как Caddy выпустит Let's Encrypt-сертификат (см. `docs/server-add-site.md` § 5).
 
 ## 2. Проверить распространение
 
@@ -47,17 +47,17 @@ dig +short dev.{domain}             # если добавлял dev
 
 Если `dig` пусто или возвращает другой IP — подожди ещё 10 минут, в панели регистратора DNS распространяется не мгновенно. TTL=300 помогает сократить ожидание.
 
-На Cloudflare proxied (оранжевое облачко) `dig` вернёт IP Cloudflare, не твой VPS — это нормально, сертификат выпускаешь на VPS по HTTP-challenge всё равно.
+На Cloudflare proxied (оранжевое облачко) `dig` вернёт IP Cloudflare, не твой VPS — это нормально, но HTTP-01 challenge с такого облачка к Caddy не дойдёт. Для первого выпуска временно переключи в DNS-only (см. п.3 выше).
 
-## 3. Дальше — SSL и nginx
+## 3. Дальше — SSL (автоматически) и Caddy
 
-Идёт в `docs/server-add-site.md` § 4–5. Без правильных A-записей `certbot --nginx -d {domain}` сломается на проверке ownership.
+Идёт в `docs/server-add-site.md` § 4–5. Без правильных A-записей Caddy не сможет пройти HTTP-01 challenge — лог будет крутить `obtain: ...`.
 
 ## Частые проблемы
 
 - **`dig` пустой через 30 минут** → проверь, точно ли в панели сохранилась запись и нет ли CAA-записи, которая запрещает Let's Encrypt.
-- **certbot: «The client lacks sufficient authorization»** → A-запись ведёт не на этот VPS, или домен proxied через Cloudflare и HTTP-challenge не доходит до origin. Включи DNS-only (серое облачко) на время выпуска.
-- **Сайт открывается, SSL не работает** → в nginx две секции (80 и 443), а certbot дописал 443 в отдельный файл. Открой `/etc/nginx/sites-available/{site}`, свели всё в один файл, `nginx -t && reload`.
+- **Caddy крутит «obtain: solving HTTP-01 challenge»** → A-запись ведёт не на этот VPS, или домен proxied через Cloudflare. `dig +short {domain}` должен показать IP сервера; для CF — DNS-only на время выпуска.
+- **Cертификат выписался, но HTTPS отдаёт self-signed / handshake fails** → Caddy кладёт сертификаты в `/var/lib/caddy/.local/share/caddy/certificates/...`. Проверь `journalctl -u caddy --since "1 hour ago" | grep -iE "certificate|tls"`. Часто причина — между Caddy и клиентом стоит CF в Flexible mode (нужен Full strict).
 - **Почтовые MX-записи пропали при переносе на Cloudflare** → Cloudflare импортирует не все типы. Проверь MX, SPF, DKIM, DMARC вручную по старой панели.
 
 ## Записать в память проекта

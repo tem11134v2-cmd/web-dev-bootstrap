@@ -6,9 +6,9 @@
 
 Claude Code в репозитории уже сгенерировал (спека `01b-server-handoff`):
 - `.github/workflows/deploy-prod.yml` (+ опционально `deploy-dev.yml`)
-- `deploy/nginx.conf.example` — шаблон nginx-конфига с подставленным доменом и портами
+- `deploy/{site}.caddy.example` — шаблон Caddy-конфига с подставленным доменом и портами
 
-Твоя задача ниже — положить это на сервер и связать всё по портам / доменам / SSL.
+Твоя задача ниже — положить это на сервер и связать всё по портам / доменам. SSL Caddy выпустит автоматически.
 
 ## 1. Зарезервировать порты
 
@@ -53,33 +53,62 @@ pm2 save
 
 > **Note про git clone через SSH:** у `deploy`-пользователя должен быть ключ, добавленный в GitHub под аккаунтом заказчика/разработчика. Можно переиспользовать тот же `~/.ssh/deploy_key` (добавить его публичную часть в GitHub → Settings → SSH keys или как Deploy key в конкретном репо). Проверь: `ssh -T git@github.com` должно приветствовать.
 
-## 4. Положить nginx-конфиг
+## 4. Положить Caddy-конфиг
 
-```bash
-sudo cp /home/deploy/prod/{site}/deploy/nginx.conf.example /etc/nginx/sites-available/{site}
-# отредактируй если нужно (пути, порт, server_name)
-sudo ln -s /etc/nginx/sites-available/{site} /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
+Один файл на сайт в `/etc/caddy/Caddyfile.d/{site}.caddy`. Базовый шаблон:
+
+```caddyfile
+{site}.com, www.{site}.com {
+    reverse_proxy localhost:{prod-port}
+    encode gzip zstd
+
+    @static path *.css *.js *.woff2 *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    @html path / *.html
+    header @html Cache-Control "public, max-age=0, must-revalidate"
+}
+
+# Опционально — dev-поддомен с basic auth (бери hash через `caddy hash-password`):
+dev.{site}.com {
+    reverse_proxy localhost:{dev-port}
+    encode gzip zstd
+    basicauth {
+        dev <bcrypt-hash>
+    }
+}
 ```
 
-Страница должна открываться по IP или домену по HTTP. Если 502 — PM2-процесс ещё не поднят: `pm2 logs {site}-prod`.
+Применить:
+
+```bash
+sudo cp /home/deploy/prod/{site}/deploy/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
+sudo nano /etc/caddy/Caddyfile.d/{site}.caddy   # сверь домен / порт / dev-блок
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+
+# Если это первый сайт — удали placeholder, чтобы Caddy не слушал лишний :8080:
+sudo rm -f /etc/caddy/Caddyfile.d/00-placeholder.caddy
+sudo systemctl reload caddy
+```
 
 ## 5. SSL
 
+Ничего делать не нужно. При первом HTTPS-запросе Caddy сам пройдёт ACME-challenge (HTTP-01 по 80 порту), получит сертификат от Let's Encrypt и положит его в `/var/lib/caddy/`. Проверь:
+
 ```bash
-sudo certbot --nginx -d {domain}                   # только prod
-sudo certbot --nginx -d {domain} -d dev.{domain}   # если есть dev-поддомен
+curl -I https://{domain}                           # должен быть 200/301
+sudo journalctl -u caddy --since "5 min ago" | grep -i "certificate obtained"
 ```
 
-Certbot сам допишет HTTPS-секцию в `/etc/nginx/sites-available/{site}` и перезагрузит nginx. Проверь открывается ли `https://{domain}`.
+Если порт 80 закрыт ufw или DNS ещё не указывает на VPS — Caddy будет ретраиться и сыпать в лог `obtain: ...`. Проверь `dig +short {domain}` и `sudo ufw status`.
 
 ## 6. Автопродление SSL
 
-Уже настроено системным таймером `certbot.timer` (ставится из `server-manual-setup.md`). Проверить:
+Делает сам Caddy (за ~30 дней до истечения, в фоне). Cron / systemd-таймеры не нужны — мы их не ставили. Проверить состояние:
 
 ```bash
-sudo systemctl list-timers | grep certbot
-sudo certbot renew --dry-run
+sudo systemctl status caddy --no-pager
+sudo ls -la /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/{domain}/
 ```
 
 ## 7. GitHub Secrets и Variables
@@ -124,8 +153,9 @@ pm2 logs {site}-prod --lines 20       # проверь, рестартнулся
 - [ ] A-записи ведут на сервер, `dig` подтверждает.
 - [ ] `~/prod/{site}/` склонирован, собран, PM2 стартанул на нужном порту.
 - [ ] `~/dev/{site}/` (если нужен) — аналогично.
-- [ ] Nginx-конфиг подключён, `nginx -t` проходит, HTTP открывается.
-- [ ] SSL выписан certbot, HTTPS работает.
+- [ ] `/etc/caddy/Caddyfile.d/{site}.caddy` подключён, `caddy validate` проходит, HTTPS открывается.
+- [ ] SSL выписан Caddy автоматически, `https://{domain}` отдаёт 200/301.
+- [ ] Если это первый сайт — `00-placeholder.caddy` удалён.
 - [ ] GitHub Secrets/Variables заполнены.
 - [ ] Тестовый push в `main` прогнал pipeline успешно.
 - [ ] `~/ports.md` и `.claude/memory/references.md` актуальны.
@@ -134,5 +164,6 @@ pm2 logs {site}-prod --lines 20       # проверь, рестартнулся
 
 - **502 после деплоя** → `pm2 restart {site}-prod`, `pm2 logs`. Часто — забыли `npm ci` после изменения зависимостей.
 - **`git pull` в GH Actions падает** → ключ `deploy_key` не добавлен в GitHub или папка `~/prod/{site}` не инициализирована.
-- **Certbot не видит server_name** → сначала подними HTTP-секцию в nginx, перезагрузи, потом запускай certbot.
+- **Caddy не выпускает SSL** → `dig +short {domain}` не показывает IP сервера (DNS не пропагнулся), либо `ufw` блокирует 80/443. Лог: `journalctl -u caddy -n 50 | grep -i obtain`.
+- **`caddy validate` падает после правки** → typo в Caddyfile синтаксисе. Caddy показывает строку и причину; обычно — забытая `}` или пробел перед `{`.
 - **Порт занят** (`EADDRINUSE`) → не сверился с `~/ports.md`, конфликт с другим сайтом.

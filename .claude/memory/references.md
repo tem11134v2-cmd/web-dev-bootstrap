@@ -18,14 +18,14 @@ type: reference
 - **Папка dev на VPS:** `~/dev/[project]/` (если настроен dev-preview)
 - **PM2 процесс prod:** `[project]-prod` (порт из `~/ports.md` — обычно 30X0)
 - **PM2 процесс dev:** `[project]-dev` (порт prod + 1000) — если есть preview
-- **Nginx config:** `/etc/nginx/sites-available/[project]`
+- **Caddy config:** `/etc/caddy/Caddyfile.d/[project].caddy`
 
 ## Домены
 
 - **Production:** `https://[domain]`
 - **Dev preview:** `https://dev.[domain]` (если настроен)
 - **DNS:** [Cloudflare / прямые A-записи / регистратор]
-- **SSL:** Let's Encrypt, auto-renew через certbot
+- **SSL:** Let's Encrypt, выписан и автообновляется Caddy (за ~30 дней до истечения)
 
 ## Репозиторий
 

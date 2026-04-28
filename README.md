@@ -29,7 +29,7 @@ specs/                     — последовательность задач
   00.5-new-project-init.md   → ритуал разработчика до запуска Claude
   00-brief.md
   01a-local-setup.md         → Mac: тулчейн, память
-  01b-server-handoff.md      → Claude генерит deploy workflows + nginx-шаблон
+  01b-server-handoff.md      → Claude генерит deploy workflows + Caddy-шаблон
   02-project-init.md … 13-extend-site.md
   optional/                  → quiz, ecommerce, i18n, migrate-from-existing
   templates/                 → spec-template, page-spec-template
@@ -54,7 +54,7 @@ _BUILD/                    — служебное: changelog, claude-md-template
      ```
 4. **Идём по спекам 00 → 13.** Одна спека = одна сессия Claude = один
    коммит-набор. Между спеками — `/clear` и новая сессия.
-5. **Сервер:** после `01b-server-handoff` Claude положит в репо workflow и nginx-шаблон.
+5. **Сервер:** после `01b-server-handoff` Claude положит в репо workflow и Caddy-шаблон.
    Ты проходишь `docs/server-add-site.md` и `docs/domain-connect.md` — сайт подключается
    за ~30 минут.
 6. **После каждой спеки** Claude обновляет `.claude/memory/project_state.md`

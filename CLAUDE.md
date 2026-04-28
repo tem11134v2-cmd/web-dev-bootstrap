@@ -34,7 +34,7 @@ Next.js 16 (App Router, Turbopack) + Tailwind v4 + shadcn/ui (base-ui) + TypeScr
 Forms: React Hook Form + Zod → /api/lead → CRM (with `data/leads.json` fallback)
 Content: MDX (no database)
 Dev: локально на Mac, `npm run dev` на `localhost:3000`
-Deploy: git push → GitHub Actions → PM2 + Nginx + Let's Encrypt на VPS (см. docs/deploy.md)
+Deploy: git push → GitHub Actions → PM2 + Caddy (встроенный ACME) на VPS (см. docs/deploy.md)
 
 ## Rules
 

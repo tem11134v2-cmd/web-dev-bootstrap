@@ -16,12 +16,12 @@
 | `forms-and-crm.md` | Архитектура форм, RHF+Zod, /api/lead, AmoCRM/Bitrix24 шаблоны, fallback в JSON, ConsultationDialog | При создании любой формы; при подключении CRM |
 | `legal-templates.md` | 152-ФЗ: cookie-баннер, согласие на ПДн, политика, оферта, чек-лист РКН | При создании форм на RU-сайте; перед публикацией; при подаче в РКН |
 | `seo.md` | robots/sitemap, мета, Schema.org, ЧПУ, перелинковка, коммерческие факторы, Яндекс-специфика, Турбо/ИКС | На каждой новой странице; при подключении Яндекс/Google |
-| `performance.md` | Core Web Vitals, изображения, шрифты, CSS, JS, кэш, nginx, **Methodology § 13** (lessons), бюджет, чек-лист | На performance-аудите; при подозрении на регрессию; при выборе либ |
+| `performance.md` | Core Web Vitals, изображения, шрифты, CSS, JS, кэш, серверная часть (Caddy `encode gzip zstd` + Cache-Control в шаблоне `server-add-site.md`), **Methodology § 13** (lessons), бюджет, чек-лист | На performance-аудите; при подозрении на регрессию; при выборе либ |
 | `conversion-patterns.md` | 10 принципов конверсии: CTA, social proof, lead magnet, quiz, exit-intent, sticky, формы | На главной/посадочных; при доработке воронки |
 | `deploy.md` | Единая схема (Mac → GitHub → VPS), ветки, GitHub Actions, ежедневный цикл, откат, Cloudflare | При init проекта; при ежедневном деплое; при правках CI/CD |
-| `server-manual-setup.md` | Разовая настройка свежего VPS через `scripts/bootstrap-vps.sh`: пользователь, SSH, ufw, swap, Node/nginx/PM2/certbot, deploy-ключ | Один раз на каждый новый VPS |
-| `server-add-site.md` | Подключение нового сайта на готовый VPS: порты, клон, nginx, SSL, GitHub Secrets, первый деплой | Один раз на каждый новый сайт |
-| `server-multisite.md` | Как уживаются несколько сайтов на одном VPS (реестр портов, PM2, nginx, когда выносить на отдельный VPS) | При подключении 2-го и далее сайта; при масштабировании |
+| `server-manual-setup.md` | Разовая настройка свежего VPS через `scripts/bootstrap-vps.sh`: пользователь, SSH, ufw, swap, Node/Caddy/PM2, deploy-ключ | Один раз на каждый новый VPS |
+| `server-add-site.md` | Подключение нового сайта на готовый VPS: порты, клон, Caddy-конфиг, SSL (автоматический), GitHub Secrets, первый деплой | Один раз на каждый новый сайт |
+| `server-multisite.md` | Как уживаются несколько сайтов на одном VPS (реестр портов, PM2, Caddyfile.d, когда выносить на отдельный VPS) | При подключении 2-го и далее сайта; при масштабировании |
 | `domain-connect.md` | A-записи у регистратора или Cloudflare, проверка `dig`, подготовка к SSL | Один раз на каждый домен |
 | `automation.md` | Хуки `.claude/hooks/*` (session-start, before-push, guard-rm, format) + скрипты `scripts/sync-env.sh`, `rollback.sh`. Что делают, как отключить, как добавить новый | Когда непонятно что хук пишет в чате; когда нужно sync/rollback; при добавлении нового хука |
 | `troubleshooting.md` | Частые косяки: gh auth mismatch, DDoS-Guard 301, deploy_key permission denied, branch protection 403, swap не пересоздаётся, prod 404 после билда | Когда что-то сломалось — сначала сюда, потом `lessons.md` |
@@ -54,7 +54,7 @@
 | Lighthouse 90+ / PSI методика | `performance.md` § 13 |
 | «Вирусный client» антипаттерн | `architecture.md` (короткий) + `performance.md` § 13.4 (развёрнуто) |
 | `META_DESCRIPTION` константа | `architecture.md` (паттерн) + `seo.md` (применение в Schema) |
-| nginx-шаблон | `server-add-site.md` |
+| Caddy-шаблон | `server-add-site.md` |
 | GitHub Actions deploy.yml | `deploy.md` + `specs/01b-server-handoff.md` |
 | Cookie-баннер + согласие на ПДн | `legal-templates.md` |
 | 44 типа секций | `content-layout.md` |

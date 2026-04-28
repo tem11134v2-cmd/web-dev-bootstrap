@@ -51,10 +51,10 @@
      ]
    }
    ```
-7. Nginx-уровень редиректов (если применимо):
-   - `www → без www` (или наоборот)
-   - Trailing slash единый формат
-   - `/index.html`, `/index.php` → 301 на `/`
+7. Caddy-уровень редиректов (если применимо, пишутся в `/etc/caddy/Caddyfile.d/{site}.caddy`, см. `docs/seo.md` § 2):
+   - `www → без www` (или наоборот) — отдельный блок `www.{site}.com { redir https://{site}.com{uri} permanent }`
+   - `http → https` — Caddy делает автоматически
+   - Trailing slash и `/index.html` `/index.php` — через `next.config.ts` (надёжнее, чем перехватывать в Caddy)
 
 ### 4. Чистка дублей и canonical
 
@@ -89,7 +89,7 @@
 
 - robots.ts и sitemap.ts покрывают всё
 - Organization JSON-LD в layout, Service/FAQ/Breadcrumb на страницах услуг, Article на статьях
-- Редиректы 301 настроены (next.config + nginx)
+- Редиректы 301 настроены (next.config + Caddy)
 - Нет дублей title/description (проверено)
 - Google Rich Results + Yandex Validator проходят без ошибок
 - Чек-лист SEO пройден для 3-5 страниц

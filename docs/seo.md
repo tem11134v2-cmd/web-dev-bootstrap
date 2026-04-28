@@ -27,7 +27,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
 **Правила:**
 - Нет `<meta name="robots" content="noindex">` на нужных страницах.
-- Нет `X-Robots-Tag` блокировок (проверь nginx).
+- Нет `X-Robots-Tag` блокировок (`curl -I https://{domain}` — проверь, что нет `X-Robots-Tag: noindex` в ответе Caddy).
 - Страницы с GET-параметрами закрыты от индекса.
 - Контент рендерится на сервере (SSG/SSR), **не** через client-side JS.
 
@@ -42,12 +42,12 @@ async redirects() {
 }
 ```
 
-**Обязательные склейки (nginx):**
-- `www → без www` (или наоборот) — выбрать главное зеркало, 301.
-- `http → https` — 301.
-- Trailing slash — единый формат, 301 на каноничный.
-- `/index.html`, `/index.php` → 301 на `/`.
-- Множественные слеши `////` → 301 на нормальный URL.
+**Обязательные склейки (Caddy `redir` + Next.js `redirects`):**
+- `www → без www` (или наоборот) — выбрать главное зеркало, 301. В Caddy: блок `www.{site}.com { redir https://{site}.com{uri} permanent }`.
+- `http → https` — Caddy делает автоматически (если домен поднят с TLS, `:80` редиректится на `:443`).
+- Trailing slash — единый формат, через `next.config.ts` (`trailingSlash`) — это надёжнее, чем перехватывать в Caddy.
+- `/index.html`, `/index.php` → 301 на `/` через Next `redirects` (Next.js никогда не сгенерит такие пути сам, но если переехал со старого сайта — старые ссылки могут жить).
+- Множественные слеши `////` → нормальный URL: Caddy не нормализует автоматически, в site-блоке добавь `@dotslash path_regexp /{2,}` + `redir @dotslash {http.regexp.0}`.
 
 **Trailing slash в Next.js:**
 ```typescript

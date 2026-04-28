@@ -34,7 +34,7 @@
 5. Настроить `next.config.ts` (без standalone — см. `docs/stack.md`):
    ```typescript
    const nextConfig = {
-     compress: false, // сжатие на nginx
+     compress: false, // сжатие делает Caddy (encode gzip zstd в шаблоне server-add-site)
      images: {
        formats: ['image/avif', 'image/webp'],
        deviceSizes: [640, 750, 828, 1080, 1200, 1920],

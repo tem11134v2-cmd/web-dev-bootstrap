@@ -116,6 +116,37 @@ fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /
 
 **Диагностика:** если prod 404 на заведомо существующий файл в `.next/server/app/`, **первая гипотеза** — pm2 работает со старого билда. Проверка: сравнить `pm2 info {site}-prod` (uptime) и `stat -c '%y' .next/BUILD_ID` (mtime). Если build моложе uptime — нужен restart.
 
+## Caddy не стартует / падает после правки
+
+**Симптом:** `systemctl status caddy` показывает `failed`, или сайты возвращают 502 после `systemctl reload caddy`.
+
+**Диагностика:**
+
+```bash
+sudo systemctl status caddy --no-pager
+sudo journalctl -u caddy -n 50 --no-pager
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+`caddy validate` покажет точный файл и строку с ошибкой. Типичные причины:
+- Опечатка в Caddyfile (забытая `}`, пробел перед `{`, неверная директива).
+- Конфликт портов: ещё что-то слушает 80/443 (старый nginx/Apache не выключен после миграции — `sudo systemctl stop nginx; sudo systemctl disable nginx`).
+- Caddy не может писать в `/var/lib/caddy/` (проверь `ls -la /var/lib/caddy`, владелец должен быть `caddy:caddy`).
+
+**Фикс:** правишь файл → `sudo caddy validate` → `sudo systemctl reload caddy`. Если сломал не один сайт, а сразу все — последний рабочий конфиг виден в `journalctl -u caddy --since "1 hour ago"`.
+
+## SSL не выписывается (Caddy)
+
+**Симптом:** HTTPS на новом домене возвращает `connection refused` или сертификат self-signed; в логах `obtain: ...`, `solving: HTTP-01 challenge ...`.
+
+**Причины (по частоте):**
+1. **DNS не указывает на VPS** — `dig +short {domain}` возвращает чужой IP или ничего. ACME-серверу некуда стучаться. Дождись пропагации или поправь A-запись.
+2. **Порт 80 закрыт** — HTTP-01 challenge идёт на 80, не на 443. `sudo ufw status` должен показывать `80/tcp ALLOW`. Без 80 ACME не пройдёт никогда.
+3. **Cloudflare proxy включён (оранжевое облачко)** — CF перехватывает `/.well-known/acme-challenge/`. Временно выключи proxy (серое облачко), дождись `certificate obtained`, включи обратно. Альтернатива — DNS-01 через Caddy plugin (отдельная сборка `xcaddy`).
+4. **Лимит Let's Encrypt** — 5 неудачных попыток на домен в час, 50 успешных в неделю. Если упёрся — Caddy сам фолбэчит на ZeroSSL (если в Caddyfile не зафиксирован issuer).
+
+**Что обычно НЕ нужно делать:** `sudo systemctl restart caddy`, `caddy reload`. Caddy сам ретраится с экспоненциальным бэкоффом. Рестарт сбрасывает счётчик попыток и может ускорить упирание в лимит.
+
 ## Pre-push checklist (Mac)
 
 Перед серьёзным push в main:

@@ -93,9 +93,12 @@ pm2 restart {site}-prod
 
 ### SSL-сертификат истёк
 
+Caddy выписывает и обновляет SSL сам (за ~30 дней до истечения). Если всё же истёк — обычно проблема в том, что Caddy не работал. Лечится так:
+
 ssh deploy@{ip}
-sudo certbot renew
-sudo systemctl reload nginx
+sudo systemctl status caddy --no-pager
+sudo journalctl -u caddy --since "1 day ago" | grep -iE "error|certificate"
+sudo systemctl restart caddy   # только если status показывает failed
 
 ### Обновления из GitHub не приехали
 
@@ -143,7 +146,7 @@ npm ci && npm run build && pm2 restart {site}-prod
     sudo apt update && sudo apt upgrade -y          # ОС патчи (auto-updates security-only, остальное вручную)
     pm2 logs --nostream --lines 100                 # быстрый просмотр ошибок
     df -h                                           # свободное место
-    sudo certbot certificates                       # SSL сроки
+    sudo systemctl status caddy --no-pager          # Caddy жив? (он сам обновляет SSL за 30 дней до)
     ```
 12. Напомнить заказчику раз в квартал смотреть Я.Вебмастер на ошибки индексации и PSI на деградацию.
 
