@@ -16,6 +16,16 @@ type: reference
 - **Кастомные страницы:** `app/[slug]/page.tsx` — собираются из секций вручную.
 - **Шаблон страницы блога:** `components/blog/PostTemplate.tsx` (если есть блог).
 
+## Контент (MDX через Content Collections)
+
+- **Конфиг коллекций:** `content-collections.ts` в корне — Zod-схема для frontmatter,
+  единая точка истины для типов всех `.mdx` в `content/`.
+- **Импорт постов:** `import { allPosts } from 'content-collections'` —
+  типизированный массив, генерируется на билде в `.content-collections/generated`.
+- **Рендер MDX:** `<MDXContent code={post.mdx} components={{ Callout, ... }} />`
+  из `@content-collections/mdx/react`.
+- **Папка контента:** `content/blog/*.mdx` (статьи), `content/services/*.mdx` (услуги).
+
 ## Секции (переиспользуемые блоки)
 
 - **Hero (главная):** `components/sections/HomeHero.tsx` — со stats и анимированными счётчиками

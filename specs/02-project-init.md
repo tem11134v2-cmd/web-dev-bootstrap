@@ -29,8 +29,9 @@
    ```
 4. Установить дополнительные пакеты:
    ```bash
-   pnpm add react-hook-form @hookform/resolvers zod next-mdx-remote gray-matter sharp lucide-react clsx tailwind-merge class-variance-authority tw-animate-css
+   pnpm add react-hook-form @hookform/resolvers zod @marsidev/react-turnstile sharp lucide-react clsx tailwind-merge class-variance-authority tw-animate-css
    ```
+   `@marsidev/react-turnstile` — клиент Cloudflare Turnstile (антиспам форм, см. `docs/forms-and-crm.md` § «Антиспам»). Подключение в формы и серверная verify — спека 09. MDX-стек (`content-collections` + плагины) ставится отдельно в `specs/07-blog-optional.md` — он опциональный, только если в `docs/pages.md` запланирован блог.
 5. Установить и инициализировать Biome (заменяет ESLint+Prettier) + типы Schema.org:
    ```bash
    pnpm add -D --save-exact @biomejs/biome
