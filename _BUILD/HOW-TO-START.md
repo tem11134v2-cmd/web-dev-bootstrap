@@ -229,13 +229,29 @@ cd migrator
 
 ## 8. Секреты на VPS
 
-`.env.production` живёт у тебя локально (`~/projects/{site}/.env.production`, gitignored).
+`.env.production` живёт у тебя локально (`~/projects/{site}/.env.production`, gitignored). На прод его доставляет **GitHub Actions** на каждом деплое — не ты.
 
-Промпт Claude'у: «**синхронизируй .env на прод**» — Claude прогонит `scripts/sync-env.sh`, scp + `pm2 restart --update-env`. Не коммитим, не лезем в Actions Secrets для рантайма.
+**Как это работает.** В GitHub → Settings → Environments → `production` лежит один multiline-секрет `PROD_ENV_FILE` = всё содержимое твоего `.env.production`. Каждый push в `main` запускает workflow, тот пишет файл в `releases/<sha>/.env` рядом со standalone-сборкой и переключает симлинк `current/`. PM2 видит свежие env через `pm2 reload --update-env`.
+
+**Когда поменялись секреты** (новый TG-токен, ротация SMTP-пароля, ...):
+
+```bash
+# 1. Поправь локально:
+nano ~/projects/{site}/.env.production
+
+# 2. Загрузи весь файл одним секретом (заменит существующий):
+gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} \
+  < ~/projects/{site}/.env.production
+
+# 3. Триггерни деплой пустым коммитом или повторным запуском workflow:
+git commit --allow-empty -m "chore: bump env" && git push origin main
+```
+
+**Fallback (когда Actions недоступны или надо быстро).** Промпт Claude'у: «**синхронизируй .env на прод как fallback**» — он прогонит `scripts/sync-env.sh`, патчит `current/.env` через симлинк и делает `pm2 reload`. Это **временно**: следующий push в main перезапишет файл из `PROD_ENV_FILE` секрета, поэтому `gh secret set` всё равно нужен, чтобы изменение пережило деплой.
 
 ## 9. Сломал прод?
 
-Промпт Claude'у: «**откати прод на коммит `<hash>`**» — Claude прогонит `scripts/rollback.sh <hash>` (ssh + git reset + rebuild + pm2 restart) и подскажет команду для `git revert + push`, чтобы починка пошла через Actions поверх.
+Промпт Claude'у: «**откати прод на предыдущий релиз**» — Claude прогонит `scripts/rollback.sh` (атомарный switch симлинка `current → releases/<previous-sha>` + `pm2 reload`, миллисекунды, без пересборки) и подскажет команду для `git revert + push`, чтобы починка пошла через Actions поверх.
 
 `<hash>` — короткий идентификатор коммита, обычно 7 символов вроде `abc1234`. Видно в `git log` или в URL GitHub-коммита (последние 7 символов после `/commit/`).
 
@@ -261,7 +277,7 @@ cd migrator
 | Путь | Что |
 |---|---|
 | `~/projects/{site}/` | Код сайта, локальная разработка |
-| `~/projects/{site}/.env.production` | Локальные секреты (gitignored, синкаются на VPS через `scripts/sync-env.sh`) |
+| `~/projects/{site}/.env.production` | Локальные секреты (gitignored). Источник истины для `PROD_ENV_FILE` GitHub-секрета — после правки делай `gh secret set --env production PROD_ENV_FILE < ...` и пуш в main |
 | `~/Downloads/HOW-TO-START.docx` | Этот файл (docx-версия для печати) |
 | `~/ClaudeCode/web-dev-bootstrap/` | Исходный шаблон (редактируется когда улучшаешь сам алгоритм) |
 | `~/.ssh/config` | Алиасы SSH к серверам (`{site}-new` и т.п.) |

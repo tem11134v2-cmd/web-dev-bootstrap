@@ -40,13 +40,18 @@
 
 Скрипты — bash-утилиты, которые Claude (или вы) запускаете руками или по команде. Все: `set -euo pipefail`, идемпотентны, требуют подтверждения для деструктивных операций.
 
-### `scripts/sync-env.sh [site] [ssh_alias]`
+### `scripts/sync-env.sh [site] [ssh_alias]` — **fallback**
 
-Копирует локальный `.env.production` (gitignored) на VPS в `/home/deploy/prod/{site}/.env`, выставляет `chmod 600`, делает `pm2 restart {site}-prod --update-env`. По дефолту site берётся из `package.json#name`, ssh_alias — `${site}-new`.
+В штатном flow `.env` на VPS пишет сам GitHub Actions workflow на каждом деплое — берёт содержимое из Environment-секрета `PROD_ENV_FILE` и кладёт в `releases/<sha>/.env` рядом с standalone-сборкой. Менять секреты — через `gh secret set --env production PROD_ENV_FILE < ~/projects/{site}/.env.production` или GitHub UI.
 
-Спрашивает подтверждение `[y/N]` перед scp.
+`sync-env.sh` нужен только в трёх ситуациях:
+1. **Actions недоступны** (GitHub outage, сеть режет коннект к runners) — а сайт лежит, и надо подкинуть env прямо сейчас.
+2. **Env поменялся mid-cycle**, ждать следующего push в main не хочется — патчим текущий релиз руками, потом всё равно обновляем `PROD_ENV_FILE` секрет (иначе следующий деплой откатит правку).
+3. **Recovery после ручных правок на VPS** — выровнять env по локальному `.env.production` как источнику истины.
 
-**Когда:** после получения новых TG/SMTP/CRM credentials, при ротации секретов, после изменения переменных окружения.
+Скрипт делает: scp `~/projects/{site}/.env.production` → `/home/deploy/prod/{site}/current/.env` (через симлинк, попадает в активный `releases/<sha>/.env`), `chmod 600`, `pm2 reload {site}-prod --update-env`. По дефолту site берётся из `package.json#name`, ssh_alias — `${site}` (т.е. в `~/.ssh/config` нужен `Host {site}`).
+
+Спрашивает подтверждение `[y/N]` перед scp. Сразу предупреждает, что следующий push в main перезапишет значение из `PROD_ENV_FILE` секрета.
 
 ### `scripts/rollback.sh [site] [ssh_alias]`
 
