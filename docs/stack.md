@@ -13,7 +13,7 @@
 | shadcn/ui | latest | UI компоненты (base-ui примитивы, **не** Radix) |
 | React Hook Form | 7+ | Управление формами |
 | Zod | 4+ | Валидация схем (см. note ниже) |
-| MDX | via next-mdx-remote | Контент (блог, страницы услуг) |
+| MDX | via Content Collections | Контент (блог, страницы услуг) — типобезопасный frontmatter через Zod-схему, build-time компиляция (см. https://www.content-collections.dev/) |
 | Sonner | 2+ | Toast-уведомления |
 | Lucide React | latest | Иконки |
 | Sharp | latest | Оптимизация изображений (build-time) |
@@ -25,7 +25,8 @@
 - `tailwind-merge` — мерж Tailwind-классов без конфликтов
 - `class-variance-authority` (CVA) — варианты компонентов
 - `tw-animate-css` — CSS-анимации для Tailwind v4
-- `gray-matter` — парсинг frontmatter в MDX
+- `content-collections` + `@content-collections/core` + `@content-collections/mdx` + `@content-collections/next` — типобезопасный MDX-стек для блога и контентных страниц. Заменяет связку `next-mdx-remote` + `gray-matter`. Frontmatter валидируется Zod-схемой в `content-collections.ts`, MDX компилируется на билде в `.content-collections/generated`. См. `specs/07-blog-optional.md`.
+- `@marsidev/react-turnstile` — клиент Cloudflare Turnstile (антиспам форм). Серверная часть — fetch на `challenges.cloudflare.com/turnstile/v0/siteverify` без сторонних либ. Подробности — `docs/forms-and-crm.md` § «Антиспам — Cloudflare Turnstile».
 - `schema-dts` (devDep) — типы Schema.org от Google. Используется в `lib/schema.ts` для типобезопасных JSON-LD генераторов: `WithContext<Service>`, `WithContext<Article>`, `WithContext<BreadcrumbList>`. Опечатка в `@type` или поле — TypeScript-ошибка на билде, а не «странный warning в Yandex Validator уже на проде».
 
 ## Почему этот стек
@@ -40,7 +41,7 @@
 
 **React Hook Form + Zod.** Минимальные ре-рендеры, нативная валидация, типобезопасность. Zod-схема = source of truth для клиента и сервера. На лендинге ~100 KB Zod в бандле незаметны, в обмен — единая экосистема и зрелая интеграция с RHF.
 
-**MDX.** Контент в git, нет БД, нет CMS. Frontmatter для метаданных. Деплоится вместе с кодом.
+**MDX через Content Collections.** Контент в git, нет БД, нет CMS. Frontmatter валидируется Zod-схемой в `content-collections.ts` — опечатка в дате или нехватка поля ловится на билде, а не runtime-500. Скомпилированный MDX импортируется как типизированный массив (`allPosts`, `allServices`) — IDE-автокомплит, никакого `data: any` из gray-matter. Деплоится вместе с кодом.
 
 ## Инициализация проекта
 
@@ -49,9 +50,8 @@ npx create-next-app@latest project-name --typescript --tailwind --app --turbopac
 cd project-name
 npx shadcn@latest init
 pnpm add \
-  react-hook-form @hookform/resolvers zod \
+  react-hook-form @hookform/resolvers zod @marsidev/react-turnstile \
   sonner lucide-react \
-  next-mdx-remote gray-matter \
   sharp clsx tailwind-merge class-variance-authority tw-animate-css
 pnpm add -D --save-exact @biomejs/biome
 pnpm add -D schema-dts
@@ -59,6 +59,8 @@ pnpm exec biome init
 ```
 
 Флаг `--no-eslint` нужен потому что мы заменили ESLint+Prettier на Biome (один бинарник, один конфиг, проще CI). Готовый шаблон `biome.json` лежит в корне bootstrap'а как `biome.json.example` — копируй и дорабатывай при необходимости. Дальнейшие шаги настройки (структура папок, tailwind.config, scripts) — см. `specs/02-project-init.md` и `specs/03-design-system.md`.
+
+MDX-стек (`content-collections` + `@content-collections/core` + `@content-collections/mdx` + `@content-collections/next`) ставится опционально в `specs/07-blog-optional.md` — только если в `docs/pages.md` запланирован блог или MDX-страницы. Без блога эти пакеты в проекте не нужны.
 
 ## Скрипты `package.json`
 

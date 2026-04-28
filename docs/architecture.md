@@ -24,9 +24,11 @@ project/
 │   ├── layout/                 # Header, Footer, MobileMenu, Navigation
 │   ├── sections/               # Секции страниц (Hero, FAQ, Steps, ...)
 │   └── forms/                  # ContactForm, QuizForm, ConsultationDialog
-├── content/
+├── content/                    # Source MDX, парсится Content Collections на билде
 │   ├── blog/                   # Статьи (.mdx)
 │   └── services/               # Контент страниц услуг (.mdx)
+├── content-collections.ts      # Zod-схема + конфиг коллекций
+├── .content-collections/       # Сгенерированные типы и скомпилированный MDX (gitignored)
 ├── lib/
 │   ├── utils.ts                # cn() и общие хелперы
 │   ├── consultation-context.tsx # Глобальный контекст модалки
@@ -51,10 +53,12 @@ project/
 - ISR для контента с обновлениями (блог).
 - API routes для динамики (формы).
 
-**MDX для контента.**
+**MDX через Content Collections.**
 - Файлы в git, нет БД, нет CMS.
-- Frontmatter для метаданных (`title`, `description`, `date`).
-- React-компоненты прямо в контенте.
+- `content-collections.ts` в корне — Zod-схема для frontmatter, единая точка истины для типов.
+- На билде Content Collections парсит `content/**/*.mdx`, валидирует frontmatter, компилирует MDX и кладёт результат в `.content-collections/generated`. В коде импортируется как `import { allPosts } from 'content-collections'` — типизированный массив с автокомплитом.
+- React-компоненты прямо в контенте через `<MDXContent code={post.mdx} components={{ Callout }} />`.
+- Опечатка в `@type` или невалидный `date` — TypeScript-ошибка / понятный лог на билде, не runtime-500.
 
 **Глобальные модалки через React Context.**
 - `ConsultationDialogProvider` в `app/layout.tsx`.
