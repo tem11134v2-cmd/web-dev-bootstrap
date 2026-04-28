@@ -26,6 +26,7 @@
 - `class-variance-authority` (CVA) — варианты компонентов
 - `tw-animate-css` — CSS-анимации для Tailwind v4
 - `gray-matter` — парсинг frontmatter в MDX
+- `schema-dts` (devDep) — типы Schema.org от Google. Используется в `lib/schema.ts` для типобезопасных JSON-LD генераторов: `WithContext<Service>`, `WithContext<Article>`, `WithContext<BreadcrumbList>`. Опечатка в `@type` или поле — TypeScript-ошибка на билде, а не «странный warning в Yandex Validator уже на проде».
 
 ## Почему этот стек
 
@@ -53,6 +54,7 @@ pnpm add \
   next-mdx-remote gray-matter \
   sharp clsx tailwind-merge class-variance-authority tw-animate-css
 pnpm add -D --save-exact @biomejs/biome
+pnpm add -D schema-dts
 pnpm exec biome init
 ```
 

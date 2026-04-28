@@ -67,10 +67,24 @@ Server Component по умолчанию (нулевой клиентский JS
 
 ### 4. JSON-LD генерация
 
-5. Создать `lib/schema.ts` с функциями:
-   - `generateServiceSchema(data: ServicePageData)` — JSON-LD Service
-   - `generateBreadcrumbSchema(slug: string)` — JSON-LD BreadcrumbList
-   - `generateFAQSchema(items)` — JSON-LD FAQPage
+5. Создать `lib/schema.ts` с типизированными генераторами через `schema-dts` (установлен в спеке 02):
+   ```typescript
+   import type { WithContext, Service, BreadcrumbList, FAQPage } from 'schema-dts'
+
+   export function generateServiceSchema(data: ServicePageData): WithContext<Service> {
+     return {
+       '@context': 'https://schema.org',
+       '@type': 'Service',
+       name: data.metaTitle,
+       description: data.metaDescription,
+       // ...
+     }
+   }
+
+   export function generateBreadcrumbSchema(slug: string): WithContext<BreadcrumbList> { /* ... */ }
+   export function generateFAQSchema(items: { q: string; a: string }[]): WithContext<FAQPage> { /* ... */ }
+   ```
+   Типизация ловит опечатки в `@type`/полях на билде (`tsc --noEmit`), а не на Yandex Validator-е уже после деплоя.
 6. В шаблоне внедрить JSON-LD автоматически из `data` (не хардкод в каждом page.tsx)
 
 ### 5. Proof of concept

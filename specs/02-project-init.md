@@ -31,12 +31,15 @@
    ```bash
    pnpm add react-hook-form @hookform/resolvers zod next-mdx-remote gray-matter sharp lucide-react clsx tailwind-merge class-variance-authority tw-animate-css
    ```
-5. Установить и инициализировать Biome (заменяет ESLint+Prettier):
+5. Установить и инициализировать Biome (заменяет ESLint+Prettier) + типы Schema.org:
    ```bash
    pnpm add -D --save-exact @biomejs/biome
+   pnpm add -D schema-dts
    pnpm exec biome init
    ```
    Скопировать содержимое `biome.json.example` из bootstrap-репо в `biome.json` проекта (или адаптировать сгенерированный). Ключевые настройки: `linter.recommended + a11y.recommended`, `formatter.lineWidth: 100`, `quoteStyle: single`, `semicolons: asNeeded`, `useSortedClasses` для Tailwind. После — прогнать `pnpm exec biome check --write` один раз, чтобы привести create-next-app файлы к формату.
+
+   `schema-dts` даёт типы для JSON-LD (`WithContext<Service>`, `WithContext<BreadcrumbList>` и т.д.) — используются в `lib/schema.ts` начиная со спеки 05. Без них опечатка в `@type` ловится только Yandex Validator-ом на проде.
 6. Настроить `next.config.ts` (без standalone — см. `docs/stack.md`):
    ```typescript
    const nextConfig = {
