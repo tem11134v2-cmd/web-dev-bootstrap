@@ -17,6 +17,7 @@
 | Sonner | 2+ | Toast-уведомления |
 | Lucide React | latest | Иконки |
 | Sharp | latest | Оптимизация изображений (build-time) |
+| Biome | 2+ | Линтер + форматтер в одном бинарнике (заменяет ESLint+Prettier, ~10× быстрее, см. https://biomejs.dev) |
 
 ## Вспомогательные пакеты
 
@@ -43,7 +44,7 @@
 ## Инициализация проекта
 
 ```bash
-npx create-next-app@latest project-name --typescript --tailwind --app --turbopack
+npx create-next-app@latest project-name --typescript --tailwind --app --turbopack --no-eslint
 cd project-name
 npx shadcn@latest init
 npm install \
@@ -51,9 +52,11 @@ npm install \
   sonner lucide-react \
   next-mdx-remote gray-matter \
   sharp clsx tailwind-merge class-variance-authority tw-animate-css
+npm install -D --save-exact @biomejs/biome
+npx biome init
 ```
 
-Дальнейшие шаги настройки (структура папок, tailwind.config, scripts) — см. `specs/02-project-init.md` и `specs/03-design-system.md`.
+Флаг `--no-eslint` нужен потому что мы заменили ESLint+Prettier на Biome (один бинарник, один конфиг, проще CI). Готовый шаблон `biome.json` лежит в корне bootstrap'а как `biome.json.example` — копируй и дорабатывай при необходимости. Дальнейшие шаги настройки (структура папок, tailwind.config, scripts) — см. `specs/02-project-init.md` и `specs/03-design-system.md`.
 
 ## Скрипты `package.json`
 
@@ -63,7 +66,9 @@ npm install \
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "biome check",
+    "format": "biome check --write",
+    "typecheck": "tsc --noEmit"
   }
 }
 ```
@@ -71,3 +76,4 @@ npm install \
 - `dev` на Mac по умолчанию на `localhost:3000` (совпадает с портом прода на VPS — так меньше путаницы при проверке URL-ов).
 - На VPS порт prod-процесса выбирается из реестра (`docs/server-multisite.md`) — обычно 3000/3010/3020 — и прописывается в PM2-команде `PORT=3010 pm2 start npm --name {site}-prod -- start`, а не в `package.json`. Скрипт `start` остаётся как fallback.
 - Растровые картинки в `public/` оптимизирует `next/image` на лету (sharp идёт как `optionalDependency` Next.js 15+ и подключается автоматически). Постбилд-шага сжатия нет.
+- `lint` и `format` идут через Biome — он же делает сортировку Tailwind-классов (правило `useSortedClasses`), поэтому `prettier-plugin-tailwindcss` не нужен. `typecheck` отделён от `lint`, потому что Biome не делает type-checking — это всегда `tsc`.
