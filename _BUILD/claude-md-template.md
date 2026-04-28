@@ -43,6 +43,18 @@ Deploy: git push → GitHub Actions → PM2 + Caddy (встроенный ACME) 
 - **Secrets:** `.env*` (except `.env.example`) — never commit. Production secrets live in GitHub Environment `production` (single multiline secret `PROD_ENV_FILE` = full `.env.production`); the deploy workflow writes them into `releases/<sha>/.env` on every push. Update via `gh secret set --env production PROD_ENV_FILE < ~/projects/{site}/.env.production`. Fallback when Actions are down: `scripts/sync-env.sh` patches `current/.env` directly.
 - **Rollback prod:** `scripts/rollback.sh` — atomic switch of `~/prod/{site}/current` symlink back to the previous release in `releases/<previous-sha>/` + `pm2 reload`. Milliseconds, no rebuild. Then on Mac: `git revert <bad-commit> && git push origin main` — Actions builds and rsyncs a fresh release. For merge commits use `git revert -m 1 <hash>`.
 
+## Multi-Claude protocol
+
+Одна Claude-сессия = одна задача (одна спека). Параллельные сессии на **ОДНУ папку проекта** запрещены — они не видят друг друга и поломают `.claude/memory/project_state.md`. Последовательные — норма:
+
+- **Закончил работу / уходишь надолго:** `/handoff` — Claude обновит `.claude/memory/project_state.md` (Session log + Active phase + Next steps), спросит про uncommitted-изменения.
+- **Начал новую сессию:** `/resume` — Claude прочитает память, сверится с git-состоянием, кратко резюмирует где остановились и подождёт ОК на работу.
+- **Сломалось / Claude залип:** `/clear` → `/resume`. Если расходится `project_state.md` и git-state — поправь руками, потом `/resume`.
+
+Stop-хук `.claude/hooks/stop-reminder.sh` подсказывает про `/handoff` если в текущей сессии были коммиты — мягкое напоминание, не блок.
+
+Параллельно работать на **разные** папки проектов — ОК (один Claude-чат на одну папку).
+
 ## Memory triggers (when to update .claude/memory/)
 
 - **After spec complete** → update `project_state.md` (mark done, set next spec)
