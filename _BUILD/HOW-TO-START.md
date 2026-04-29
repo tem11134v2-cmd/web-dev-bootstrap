@@ -5,14 +5,10 @@
 Если Mac совершенно свежий (новый ноутбук, ничего не настроено) — сначала пройди раздел «0. Первичная настройка Mac» ниже. Это делается один раз на каждый Mac, потом только раздел 1 и дальше на каждый новый сайт.
 
 > **Версия инструкции:** v3.0 (актуально для bootstrap'а на этом теге).
-> Печатная `.docx`-версия в `_BUILD/HOW-TO-START.docx` синхронизирована с этим `.md`-файлом. Если правишь `.md` — регенерируй командой ниже:
-> ```bash
-> pandoc _BUILD/HOW-TO-START.md -o _BUILD/HOW-TO-START.docx \
->   --toc --toc-depth=2 \
->   --metadata title="Как работать с web-dev-bootstrap v3.0" \
->   --metadata lang=ru-RU
-> ```
-> Pandoc ставится через `brew install pandoc`. Опционально — скопируй итог в `~/Downloads/HOW-TO-START.docx` для печати.
+>
+> **Хочешь полный документ со всеми связанными разделами в одном файле?** Открой `_BUILD/HANDBOOK.md` — это **сборка** этого HOW-TO + `team-onboarding.md` + `domain-connect.md` + `legal-templates.md` + `troubleshooting.md` + `changelog.md`. Регенерируется командой `bash scripts/build-handbook.sh` после правок любого исходника.
+>
+> Печатная `.docx`-версия именно этого HOW-TO-START в `_BUILD/HOW-TO-START.docx`. Регенерируется через `pandoc _BUILD/HOW-TO-START.md -o _BUILD/HOW-TO-START.docx --toc --toc-depth=2 --metadata title="Как работать с web-dev-bootstrap v3.0" --metadata lang=ru-RU` (требует `brew install pandoc`).
 
 ---
 
