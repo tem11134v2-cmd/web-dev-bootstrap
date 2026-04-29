@@ -138,7 +138,14 @@ GitHub → репо → Settings → Environments → создать `production
 Скопируй `deploy/{site}.caddy.example` в `/etc/caddy/Caddyfile.d/{site}.caddy`, удали `00-placeholder.caddy` если это первый сайт, `caddy validate && systemctl reload caddy`.
 
 ## 6. Тестовый деплой
+Любой коммит, попавший в `main`, триггерит `deploy-prod.yml`. Если `main` защищён — мердж PR из `dev`. Если protection недоступна (private + free GitHub) — `git push origin main` напрямую.
    ```bash
+   # вариант 1 (main защищён):
+   git checkout dev && git commit --allow-empty -m "chore: trigger first deploy" && git push origin dev
+   gh pr create --base main --head dev --title "First deploy" --body "Triggers initial deploy-prod"
+   gh pr merge --squash --auto
+
+   # вариант 2 (нет protection):
    git push origin main
    ```
 GitHub → Actions → `Deploy production` должен пройти за 2–4 мин (build на runner, rsync, симлинк). На VPS:

@@ -253,8 +253,8 @@ test -f biome.json && echo "Biome: yes" || echo "Biome: no"
 # 1. Удалить старый lockfile и node_modules
 rm -rf node_modules package-lock.json
 
-# 2. Поставить pnpm если ещё нет
-which pnpm || npm install -g pnpm
+# 2. Поставить pnpm если ещё нет (приоритет — corepack, как в bootstrap v3)
+which pnpm || corepack enable && corepack prepare pnpm@latest --activate || npm install -g pnpm
 
 # 3. Установить зависимости через pnpm (создаст pnpm-lock.yaml)
 pnpm install
@@ -374,9 +374,26 @@ pnpm build
 
 Закоммитить: `chore: enable standalone output`.
 
-### 3.2. Server Action вместо `/api/lead`
+### 3.2. Server Action + Cloudflare Turnstile (один шаг)
 
-Если в проекте есть `app/api/lead/route.ts` — мигрируем на Server Action.
+> ⚠️ **Server Action и Turnstile делаются вместе в одном коммите.** Server Action в схеме требует обязательный `turnstileToken` (проверка ДО CRM, иначе сломанная CRM = открытый канал для ботов), а виджет Turnstile добавляет токен в форму. Если разделить шаги — между коммитами форма будет валиться Zod-валидацией на пустом токене.
+
+Если `app/api/lead/route.ts` в проекте нет (например, проект уже частично на Server Action) — пропусти подшаг (б), сразу к (в).
+
+#### а) Установить Turnstile
+
+1. Получить site-key и secret-key (Cloudflare → Turnstile → Add Site).
+2. Установить пакет:
+   ```bash
+   pnpm add @marsidev/react-turnstile
+   ```
+3. В `.env.local` (не коммитить — gitignored):
+   ```
+   NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4...
+   TURNSTILE_SECRET_KEY=0x4...
+   ```
+
+#### б) Создать Server Action
 
 Создать `app/actions/submit-lead.ts`:
 ```typescript
@@ -429,77 +446,66 @@ export async function submitLead(_prev: unknown, formData: FormData) {
 }
 ```
 
-В клиентских формах (`ConsultationDialog.tsx`, `LeadForm.tsx`) — заменить `fetch('/api/lead', ...)` на:
+#### в) Найти все формы в проекте
+
+Чтобы не пропустить ни одну:
+```bash
+# Все компоненты с формой:
+grep -rln 'useForm\|<form\|action=' app/ components/ 2>/dev/null
+
+# Все клиентские компоненты с submit-handler'ами:
+grep -rln '"use client"' app/ components/ 2>/dev/null | xargs grep -l 'onSubmit\|formAction' 2>/dev/null
+```
+Типичные кандидаты: `ConsultationDialog.tsx`, `LeadForm.tsx`, `ContactForm.tsx`, footer-форма, форма квиза.
+
+#### г) В каждой найденной форме: Turnstile widget + переключение на `useActionState`
+
+Заменить `fetch('/api/lead', ...)` на форму с виджетом и Server Action:
 ```typescript
 'use client'
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
+import { Turnstile } from '@marsidev/react-turnstile'
 import { submitLead } from '@/app/actions/submit-lead'
 
 const [state, formAction, isPending] = useActionState(submitLead, null)
-// ...
-<form action={formAction}>
-  {/* ... поля ... */}
-  <button type="submit" disabled={isPending}>
-    {isPending ? 'Отправка...' : 'Отправить'}
-  </button>
-</form>
+const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
 
-{state?.error && <p className="text-red-500">{state.error}</p>}
-{state?.success && <p className="text-green-500">Заявка отправлена!</p>}
+return (
+  <>
+    <form action={formAction}>
+      {/* ... поля name/phone/email/message/source/consent ... */}
+
+      <Turnstile
+        siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
+        options={{ theme: 'light', size: 'flexible' }}
+        onSuccess={(token) => setTurnstileToken(token)}
+      />
+      <input type="hidden" name="turnstileToken" value={turnstileToken ?? ''} />
+
+      <button type="submit" disabled={!turnstileToken || isPending}>
+        {isPending ? 'Отправка...' : 'Отправить'}
+      </button>
+    </form>
+
+    {state?.error && <p className="text-red-500">{state.error}</p>}
+    {state?.success && <p className="text-green-500">Заявка отправлена!</p>}
+  </>
+)
 ```
 
-После успешной миграции — удалить `app/api/lead/route.ts`:
+#### д) Удалить старый Route Handler
+
 ```bash
 rm app/api/lead/route.ts
 ```
 
-Проверить локально: открыть форму, отправить → лид должен дойти в CRM (или fallback в `data/leads.json`).
+#### е) Проверить локально
 
-Закоммитить: `refactor: migrate /api/lead to Server Action with Turnstile`.
+Открой каждую форму, дождись прогрузки Turnstile-виджета (~1 сек), submit — лид должен дойти в CRM (или в `data/leads.json` fallback при отвалившейся CRM). Если виджет не показывается — проверь `NEXT_PUBLIC_TURNSTILE_SITE_KEY` в `.env.local` (`console.log(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY)` в клиентском коде).
 
-### 3.3. Cloudflare Turnstile
+Закоммитить **одним коммитом** (Server Action + Turnstile вместе): `refactor: migrate /api/lead to Server Action with Turnstile`.
 
-Если в проекте Turnstile ещё не подключён:
-
-1. Получить site-key и secret-key (Cloudflare → Turnstile → Add Site)
-2. Установить:
-   ```bash
-   pnpm add @marsidev/react-turnstile
-   ```
-3. В `.env.local` (не коммитить!):
-   ```
-   NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4...
-   TURNSTILE_SECRET_KEY=0x4...
-   ```
-4. **Найти все формы в проекте**, чтобы не пропустить ни одну:
-   ```bash
-   # Все компоненты с формой:
-   grep -rln 'useForm\|<form\|action=' app/ components/ 2>/dev/null
-
-   # Все клиентские компоненты с submit-handler'ами:
-   grep -rln '"use client"' app/ components/ 2>/dev/null | xargs grep -l 'onSubmit\|formAction' 2>/dev/null
-   ```
-   Типичные кандидаты: `ConsultationDialog.tsx`, `LeadForm.tsx`, `ContactForm.tsx`, footer-форма, форма квиза.
-
-5. В **каждой** найденной форме добавить компонент Turnstile:
-   ```typescript
-   import { Turnstile } from '@marsidev/react-turnstile'
-   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
-
-   <Turnstile
-     siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
-     options={{ theme: 'light', size: 'flexible' }}
-     onSuccess={(token) => setTurnstileToken(token)}
-   />
-   <input type="hidden" name="turnstileToken" value={turnstileToken ?? ''} />
-   <button type="submit" disabled={!turnstileToken || isPending}>...</button>
-   ```
-
-6. Проверить локально: открой каждую форму, дождись прогрузки виджета (~1 сек), submit — должен пройти. Если виджет не показывается — проверь, что `NEXT_PUBLIC_TURNSTILE_SITE_KEY` доступен на клиенте (`console.log` в dev).
-
-Закоммитить: `feat: add Cloudflare Turnstile to all forms`.
-
-### 3.4. Content Collections (только если есть блог)
+### 3.3. Content Collections (только если есть блог)
 
 Пропусти этот шаг, если `content/blog/` не существует.
 
@@ -508,7 +514,7 @@ pnpm add content-collections @content-collections/core @content-collections/mdx 
 pnpm remove next-mdx-remote 2>/dev/null
 ```
 
-Создать `content-collections.ts` в корне (см. шаблон в `~/ClaudeCode/web-dev-bootstrap/specs/07-blog-optional.md` после ТЗ-1, или собственный по доке https://www.content-collections.dev/).
+Создать `content-collections.ts` в корне (см. готовый шаблон в `specs/07-blog-optional.md` bootstrap-репо, или собственный по доке https://www.content-collections.dev/).
 
 Обновить `next.config.ts`:
 ```typescript
@@ -612,14 +618,18 @@ pm2 save
 
 В deploy-prod.yml workflow это уже учтено через `pm2 reload ... || pm2 start ...` fallback. Запиши в Известные грабли, что если симлинк переключился, а сайт всё ещё отдаёт старую версию — `pm2 delete && pm2 start` решает.
 
-### 4.3. Удалить старый `deploy_key` с VPS
+### 4.3. Удалить старый `deploy_key` с VPS (если был)
+
+В bootstrap v2.x `deploy_key` — это **обычный SSH-ключ** (приватная часть на VPS, публичная в собственном `authorized_keys`), который Actions использовал для `git pull`. Не путать с GitHub Deploy Keys (отдельная фича — публичный ключ, привязанный per-repo через `Settings → Deploy keys`; в bootstrap v2.x не использовалась).
+
+После Phase 5 push-deploy git pull на VPS не нужен → ключ становится лишним:
 
 ```bash
 ssh deploy@{vps-ip}
-rm -f ~/.ssh/deploy_key ~/.ssh/deploy_key.pub
-# Из ~/.ssh/authorized_keys удалить публичную часть deploy_key (если она там была)
+ls -la ~/.ssh/deploy_key* 2>/dev/null && rm -f ~/.ssh/deploy_key ~/.ssh/deploy_key.pub
+# Из ~/.ssh/authorized_keys удалить строку с deploy_key.pub (если он был добавлен в собственный authorized_keys)
 nano ~/.ssh/authorized_keys
-# Из GitHub → Settings → Deploy keys удалить старый (если был добавлен)
+# В GitHub → Settings → Deploy keys: должно быть ПУСТО (bootstrap v2.x не использовал эту фичу). Если что-то есть — удали, оно тоже устарело.
 ```
 
 ### 4.4. Заменить `.github/workflows/deploy-prod.yml`
@@ -738,7 +748,14 @@ rm /tmp/bootstrap-settings.json
 
 ### 5.3. Обновить `CLAUDE.md`
 
-Сравнить текущий `CLAUDE.md` с актуальным `~/ClaudeCode/web-dev-bootstrap/_BUILD/claude-md-template.md`. Добавить отсутствующие секции:
+Сравнить текущий `CLAUDE.md` с актуальным шаблоном из bootstrap'а через helper:
+
+```bash
+BOOTSTRAP_GET _BUILD/claude-md-template.md /tmp/bootstrap-claude-md-template.md
+diff CLAUDE.md /tmp/bootstrap-claude-md-template.md
+```
+
+Добавить отсутствующие секции:
 - `## Multi-Claude protocol` (новая)
 - Обновлённый `## Stack` (pnpm, mise, Biome, schema-dts)
 - Обновлённый `## Commands` (`pnpm` вместо `npm`, без `compress`)
@@ -748,7 +765,7 @@ rm /tmp/bootstrap-settings.json
 
 ### 5.4. Расширить `.claude/memory/project_state.md`
 
-Привести к новой структуре с разделом «Session log» (см. шаблон в `~/ClaudeCode/web-dev-bootstrap/.claude/memory/project_state.md` после ТЗ-1).
+Привести к новой структуре с разделом «Session log» (см. шаблон в `.claude/memory/project_state.md` bootstrap-репо).
 
 Добавить запись о миграции:
 ```markdown
