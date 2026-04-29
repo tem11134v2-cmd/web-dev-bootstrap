@@ -253,8 +253,8 @@ test -f biome.json && echo "Biome: yes" || echo "Biome: no"
 # 1. Удалить старый lockfile и node_modules
 rm -rf node_modules package-lock.json
 
-# 2. Поставить pnpm если ещё нет
-which pnpm || npm install -g pnpm
+# 2. Поставить pnpm если ещё нет (приоритет — corepack, как в bootstrap v3)
+which pnpm || corepack enable && corepack prepare pnpm@latest --activate || npm install -g pnpm
 
 # 3. Установить зависимости через pnpm (создаст pnpm-lock.yaml)
 pnpm install
@@ -514,7 +514,7 @@ pnpm add content-collections @content-collections/core @content-collections/mdx 
 pnpm remove next-mdx-remote 2>/dev/null
 ```
 
-Создать `content-collections.ts` в корне (см. шаблон в `~/ClaudeCode/web-dev-bootstrap/specs/07-blog-optional.md` после ТЗ-1, или собственный по доке https://www.content-collections.dev/).
+Создать `content-collections.ts` в корне (см. готовый шаблон в `specs/07-blog-optional.md` bootstrap-репо, или собственный по доке https://www.content-collections.dev/).
 
 Обновить `next.config.ts`:
 ```typescript
@@ -618,14 +618,18 @@ pm2 save
 
 В deploy-prod.yml workflow это уже учтено через `pm2 reload ... || pm2 start ...` fallback. Запиши в Известные грабли, что если симлинк переключился, а сайт всё ещё отдаёт старую версию — `pm2 delete && pm2 start` решает.
 
-### 4.3. Удалить старый `deploy_key` с VPS
+### 4.3. Удалить старый `deploy_key` с VPS (если был)
+
+В bootstrap v2.x `deploy_key` — это **обычный SSH-ключ** (приватная часть на VPS, публичная в собственном `authorized_keys`), который Actions использовал для `git pull`. Не путать с GitHub Deploy Keys (отдельная фича — публичный ключ, привязанный per-repo через `Settings → Deploy keys`; в bootstrap v2.x не использовалась).
+
+После Phase 5 push-deploy git pull на VPS не нужен → ключ становится лишним:
 
 ```bash
 ssh deploy@{vps-ip}
-rm -f ~/.ssh/deploy_key ~/.ssh/deploy_key.pub
-# Из ~/.ssh/authorized_keys удалить публичную часть deploy_key (если она там была)
+ls -la ~/.ssh/deploy_key* 2>/dev/null && rm -f ~/.ssh/deploy_key ~/.ssh/deploy_key.pub
+# Из ~/.ssh/authorized_keys удалить строку с deploy_key.pub (если он был добавлен в собственный authorized_keys)
 nano ~/.ssh/authorized_keys
-# Из GitHub → Settings → Deploy keys удалить старый (если был добавлен)
+# В GitHub → Settings → Deploy keys: должно быть ПУСТО (bootstrap v2.x не использовал эту фичу). Если что-то есть — удали, оно тоже устарело.
 ```
 
 ### 4.4. Заменить `.github/workflows/deploy-prod.yml`
@@ -744,7 +748,14 @@ rm /tmp/bootstrap-settings.json
 
 ### 5.3. Обновить `CLAUDE.md`
 
-Сравнить текущий `CLAUDE.md` с актуальным `~/ClaudeCode/web-dev-bootstrap/_BUILD/claude-md-template.md`. Добавить отсутствующие секции:
+Сравнить текущий `CLAUDE.md` с актуальным шаблоном из bootstrap'а через helper:
+
+```bash
+BOOTSTRAP_GET _BUILD/claude-md-template.md /tmp/bootstrap-claude-md-template.md
+diff CLAUDE.md /tmp/bootstrap-claude-md-template.md
+```
+
+Добавить отсутствующие секции:
 - `## Multi-Claude protocol` (новая)
 - Обновлённый `## Stack` (pnpm, mise, Biome, schema-dts)
 - Обновлённый `## Commands` (`pnpm` вместо `npm`, без `compress`)
@@ -754,7 +765,7 @@ rm /tmp/bootstrap-settings.json
 
 ### 5.4. Расширить `.claude/memory/project_state.md`
 
-Привести к новой структуре с разделом «Session log» (см. шаблон в `~/ClaudeCode/web-dev-bootstrap/.claude/memory/project_state.md` после ТЗ-1).
+Привести к новой структуре с разделом «Session log» (см. шаблон в `.claude/memory/project_state.md` bootstrap-репо).
 
 Добавить запись о миграции:
 ```markdown
