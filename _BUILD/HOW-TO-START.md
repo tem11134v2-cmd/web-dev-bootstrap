@@ -277,8 +277,8 @@ Claude Desktop при открытии может предложить:
    - `SSH_HOST`, `SSH_USER`, `SSH_PORT`
    - `PROD_ENV_FILE` (всё содержимое `.env.production`)
 4. Создаст `.github/workflows/deploy-prod.yml` (push-based: build на runner → rsync → симлинк-релиз)
-5. Зарегистрирует домен (см. `docs/domain-connect.md`) и пропишет A-запись на IP VPS
-6. Сделает первый push в `main` → Actions запустит первый деплой → Caddy получит сертификат при первом HTTPS-запросе
+5. **Подскажет тебе** что делать с доменом (см. `docs/domain-connect.md`) — регистрация у регистратора и проставление A-записи на IP VPS это **твоя ручная работа в панели Reg.ru / GoDaddy / Cloudflare**, у Claude нет туда доступа. После того как пропишешь записи — Claude проверит через `dig +short {domain}`, что DNS распространился.
+6. Сделает первый push в `main` → Actions запустит первый деплой → Caddy получит сертификат при первом HTTPS-запросе (только когда A-запись уже работает — иначе Caddy упадёт на ACME-challenge).
 
 **Если VPS уже есть** (на нём другие сайты) — пройди только спеку `docs/server-add-site.md` (Claude умеет): выделит порт, добавит Caddy-блок, прокинет PM2-процесс. Потом `01b` для GitHub Actions.
 
