@@ -1,5 +1,7 @@
 # Spec 20: Server/Client Components Refactor
 
+> ⚠️ **Pre-v3 пример.** Стек устарел (npm + nginx + pull-based deploy). Используй ТОЛЬКО как референс **формата** спеки (декомпозиция, описание critical complexity, баланс «требования / задачи / критерии») — не копируй команды и пути. Канонический стек v3.0+ — pnpm, Caddy, push-based deploy, Server Actions.
+
 ## KB files to read first
 - docs/architecture.md (Server/Client разделение)
 - docs/performance.md (§ 13.4 «Вирусный client» антипаттерн)

@@ -1,5 +1,7 @@
 # Spec 25: Performance Audit + Optimization
 
+> ⚠️ **Pre-v3 пример.** Стек устарел (npm + nginx + pull-based deploy). Используй ТОЛЬКО как референс **формата** спеки (Background «already done», конкретные команды, перформанс-чеклист) — не копируй команды и пути. Канонический стек v3.0+ — pnpm, Caddy, push-based deploy, Lighthouse → `pnpm build`.
+
 ## KB files to read first
 - docs/performance.md
 - docs/server-add-site.md (nginx config)
