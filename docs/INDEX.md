@@ -24,7 +24,7 @@
 | `server-multisite.md` | Как уживаются несколько сайтов на одном VPS (реестр портов, PM2, Caddyfile.d, когда выносить на отдельный VPS) | При подключении 2-го и далее сайта; при масштабировании |
 | `domain-connect.md` | A-записи у регистратора или Cloudflare, проверка `dig`, подготовка к SSL | Один раз на каждый домен |
 | `automation.md` | Хуки `.claude/hooks/*` (session-start, before-push, guard-rm, format, stop-reminder) + slash-команды `.claude/commands/*` (handoff, resume, catchup) + скрипты `scripts/sync-env.sh`, `rollback.sh`. Что делают, как отключить, как добавить новый | Когда непонятно что хук пишет в чате; когда нужно sync/rollback; при добавлении нового хука; при настройке multi-Claude flow |
-| `troubleshooting.md` | Частые косяки: gh auth mismatch, DDoS-Guard 301, deploy_key permission denied, branch protection 403, swap не пересоздаётся, prod 404 после билда | Когда что-то сломалось — сначала сюда, потом `lessons.md` |
+| `troubleshooting.md` | Частые косяки: gh auth mismatch, DDoS-Guard 301, SSH permission denied в deploy job, симлинк `current` не переключился, rsync ошибки, PM2 не находит `server.js`, Caddy не стартует, SSL не выписывается, branch protection 403, swap не пересоздаётся, prod 404 | Когда что-то сломалось — сначала сюда, потом `lessons.md` |
 | `team-onboarding.md` | Для нового collaborator-а: clone, pnpm install, Claude Code, workflow `feature → dev → main`. Что **не** дают (SSH, deploy_key, secrets) | Один раз на каждого нового разработчика |
 
 ## Проектные файлы (не KB)
