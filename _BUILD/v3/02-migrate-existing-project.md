@@ -16,10 +16,87 @@
 В папке живого проекта в Claude-чате:
 
 ```
-Прочитай файл `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/02-migrate-existing-project.md`
-и выполни его на этом проекте. Сначала покажи план миграции с учётом текущей версии,
-жди подтверждения перед любыми правками.
+Прочитай файл ТЗ миграции по URL:
+https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.0/_BUILD/v3/02-migrate-existing-project.md
+
+Затем выполни его на этом проекте. Сначала покажи план миграции с учётом текущей
+версии проекта, жди подтверждения перед любыми правками.
 ```
+
+Альтернативный промт (если bootstrap уже клонирован локально):
+
+```
+Прочитай файл `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/02-migrate-existing-project.md`
+и выполни его на этом проекте. Сначала покажи план миграции, жди подтверждения.
+```
+
+Оба варианта эквивалентны — bootstrap-репо public, raw URL и локальный путь дают тот же контент.
+
+---
+
+## Helper для копирования файлов из bootstrap'а
+
+ТЗ-2 в нескольких местах копирует канонические файлы из bootstrap'а (`biome.json.example`, hooks, slash-команды, deploy-templates). Чтобы это работало **с любой машины** (с локальным bootstrap'ом и без), в начале миграции Claude должен определить helper-функцию `BOOTSTRAP_GET` и использовать её во всех `cp`-командах ниже.
+
+**Положи этот блок в `~/.bootstrap-helper.sh` на время миграции:**
+
+```bash
+#!/usr/bin/env bash
+# Универсальный getter файла из bootstrap-репо.
+# Использует локальный clone если есть, иначе скачивает с GitHub raw.
+
+BOOTSTRAP_LOCAL="${BOOTSTRAP_LOCAL:-$HOME/ClaudeCode/web-dev-bootstrap}"
+BOOTSTRAP_TAG="${BOOTSTRAP_TAG:-v3.0}"
+BOOTSTRAP_RAW="https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/${BOOTSTRAP_TAG}"
+
+BOOTSTRAP_GET() {
+  local src="$1"      # путь относительно корня bootstrap-репо
+  local dst="$2"      # куда положить (относительно cwd текущего проекта)
+
+  if [ -f "$BOOTSTRAP_LOCAL/$src" ]; then
+    mkdir -p "$(dirname "$dst")"
+    cp "$BOOTSTRAP_LOCAL/$src" "$dst"
+    echo "✓ $dst (from local clone)"
+  else
+    mkdir -p "$(dirname "$dst")"
+    if curl -fsSL "$BOOTSTRAP_RAW/$src" -o "$dst"; then
+      echo "✓ $dst (fetched from $BOOTSTRAP_RAW/$src)"
+    else
+      echo "✗ FAILED: $dst (couldn't fetch from $BOOTSTRAP_RAW/$src or local $BOOTSTRAP_LOCAL/$src)" >&2
+      return 1
+    fi
+  fi
+}
+
+export -f BOOTSTRAP_GET
+export BOOTSTRAP_LOCAL BOOTSTRAP_TAG BOOTSTRAP_RAW
+```
+
+Затем в каждой Claude-сессии миграции (или прописано в session-init):
+
+```bash
+source ~/.bootstrap-helper.sh
+```
+
+**Примеры использования** (вместо прямого `cp ~/ClaudeCode/web-dev-bootstrap/...` ниже в ТЗ-2 используй `BOOTSTRAP_GET`):
+
+```bash
+BOOTSTRAP_GET biome.json.example biome.json
+BOOTSTRAP_GET .claude/hooks/format.sh .claude/hooks/format.sh
+BOOTSTRAP_GET .claude/hooks/guard-rm.sh .claude/hooks/guard-rm.sh
+BOOTSTRAP_GET .claude/hooks/stop-reminder.sh .claude/hooks/stop-reminder.sh
+BOOTSTRAP_GET .claude/commands/handoff.md .claude/commands/handoff.md
+BOOTSTRAP_GET .claude/commands/resume.md .claude/commands/resume.md
+BOOTSTRAP_GET .claude/commands/catchup.md .claude/commands/catchup.md
+BOOTSTRAP_GET _BUILD/v3/templates/deploy-prod.yml.example .github/workflows/deploy-prod.yml
+BOOTSTRAP_GET scripts/rollback.sh scripts/rollback.sh && chmod +x scripts/rollback.sh
+```
+
+`BOOTSTRAP_TAG=v3.0` означает: миграция всегда использует **зафиксированную версию** v3.0 bootstrap'а, даже если в `main` появятся правки. Это **намеренно** — чтобы поведение миграции было воспроизводимо. Если нужна более свежая версия (например, в bootstrap'е появился v3.1 с фиксами): `export BOOTSTRAP_TAG=v3.1` перед запуском миграции.
+
+### Про текстовые ссылки на файлы bootstrap'а в этом ТЗ
+
+Во многих местах ниже встречаются формулировки вроде «см. шаблон в `~/ClaudeCode/web-dev-bootstrap/<path>`» — это **референс на файл в bootstrap-репо**, не команда. Если у тебя bootstrap клонирован локально — открывай его по этому пути. Если нет — открывай тот же файл на GitHub: `https://github.com/tem11134v2-cmd/web-dev-bootstrap/blob/v3.0/<path>`. Содержимое идентично.
 
 ---
 
@@ -108,11 +185,22 @@ git push origin pre-v3-migration-$(date +%Y%m%d)
 Если проект склонирован из v2.0.x или v2.1.x — в его `specs/*.md` и `docs/*.md` могут быть те же P0 баги, что лечились в Phase 0 ТЗ-1 (`localhost:4000`, `migration-map`, `compress-images`, schema A/B и т.д.). На initial setup это уже не влияет (он давно прошёл), но если планируешь дальше использовать `specs/13-extend-site.md` для правок — стоит подтянуть актуальные версии.
 
 ```bash
-# Полная замена specs/ и docs/ из v3 bootstrap'а — НО исключая project-specific файлы
-rsync -av --exclude='spec.md' --exclude='content.md' --exclude='pages.md' --exclude='integrations.md' \
-  ~/ClaudeCode/web-dev-bootstrap/docs/ docs/
-
-rsync -av ~/ClaudeCode/web-dev-bootstrap/specs/ specs/
+# Если bootstrap локально (rsync напрямую):
+if [ -d "$BOOTSTRAP_LOCAL" ]; then
+  rsync -av --exclude='spec.md' --exclude='content.md' --exclude='pages.md' --exclude='integrations.md' \
+    "$BOOTSTRAP_LOCAL/docs/" docs/
+  rsync -av "$BOOTSTRAP_LOCAL/specs/" specs/
+else
+  # Bootstrap локально нет — скачать tarball и развернуть:
+  TMP=$(mktemp -d)
+  curl -fsSL "https://github.com/tem11134v2-cmd/web-dev-bootstrap/archive/refs/tags/${BOOTSTRAP_TAG}.tar.gz" \
+    | tar xz -C "$TMP"
+  EXTRACTED="$TMP/web-dev-bootstrap-${BOOTSTRAP_TAG}"
+  rsync -av --exclude='spec.md' --exclude='content.md' --exclude='pages.md' --exclude='integrations.md' \
+    "$EXTRACTED/docs/" docs/
+  rsync -av "$EXTRACTED/specs/" specs/
+  rm -rf "$TMP"
+fi
 # specs/ обычно не имеет project-specific файлов — там только setup-инструкции
 ```
 
@@ -216,7 +304,7 @@ pnpm remove eslint eslint-config-next prettier prettier-plugin-tailwindcss \
 pnpm add -D --save-exact @biomejs/biome
 
 # 3. Скопировать канонический biome.json из bootstrap (single source of truth)
-cp ~/ClaudeCode/web-dev-bootstrap/biome.json.example ./biome.json
+BOOTSTRAP_GET biome.json.example biome.json
 
 # 4. Удалить старые конфиги
 rm -f .eslintrc.* .prettierrc* .prettierignore
@@ -238,7 +326,7 @@ git commit -m "chore: migrate ESLint+Prettier to Biome"
 Канонический `format.sh` (Biome вместо Prettier) лежит в bootstrap'е. Скопировать поверх:
 
 ```bash
-cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/format.sh .claude/hooks/format.sh
+BOOTSTRAP_GET .claude/hooks/format.sh .claude/hooks/format.sh
 chmod +x .claude/hooks/format.sh
 ```
 
@@ -249,7 +337,7 @@ chmod +x .claude/hooks/format.sh
 В v3 `guard-rm.sh` покрывает дополнительные случаи: `rm -rf .`, `rm -rf ./`, `git push -f` (короткая форма), и др. Скопировать актуальный из bootstrap'а:
 
 ```bash
-cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/guard-rm.sh .claude/hooks/guard-rm.sh
+BOOTSTRAP_GET .claude/hooks/guard-rm.sh .claude/hooks/guard-rm.sh
 chmod +x .claude/hooks/guard-rm.sh
 ```
 
@@ -536,11 +624,11 @@ nano ~/.ssh/authorized_keys
 
 ### 4.4. Заменить `.github/workflows/deploy-prod.yml`
 
-Канонический шаблон — `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/templates/deploy-prod.yml.example`. Скопировать целиком:
+Канонический шаблон лежит в bootstrap'е по пути `_BUILD/v3/templates/deploy-prod.yml.example`. Скопировать через helper:
 
 ```bash
-cp ~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/templates/deploy-prod.yml.example \
-   ~/projects/{site}/.github/workflows/deploy-prod.yml
+mkdir -p .github/workflows
+BOOTSTRAP_GET _BUILD/v3/templates/deploy-prod.yml.example .github/workflows/deploy-prod.yml
 ```
 
 Менять в нём ничего не нужно — все per-site значения вынесены в Variables/Secrets:
@@ -552,12 +640,12 @@ cp ~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/templates/deploy-prod.yml.example \
 
 ### 4.5. Переписать локальный `scripts/rollback.sh`
 
-Готовая версия лежит в bootstrap-репо `~/ClaudeCode/web-dev-bootstrap/scripts/rollback.sh` (атомарный симлинк-switch вместо `git reset + rebuild`). Скопировать:
+Готовая версия лежит в bootstrap-репо в `scripts/rollback.sh` (атомарный симлинк-switch вместо `git reset + rebuild`). Скопировать через helper:
 
 ```bash
-cp ~/ClaudeCode/web-dev-bootstrap/scripts/rollback.sh \
-   ~/projects/{site}/scripts/rollback.sh
-chmod +x ~/projects/{site}/scripts/rollback.sh
+mkdir -p scripts
+BOOTSTRAP_GET scripts/rollback.sh scripts/rollback.sh
+chmod +x scripts/rollback.sh
 ```
 
 Сигнатура поменялась: было `scripts/rollback.sh <commit-hash> [site] [ssh_alias]`, стало `scripts/rollback.sh [site] [ssh_alias]` — скрипт сам находит предыдущий релиз в `~/prod/{site}/releases/`. Проверь, что в `~/.ssh/config` есть `Host {site}` (или передавай ssh_alias явно).
@@ -594,12 +682,12 @@ pm2 reload {site}-prod --update-env
 
 ### 5.1. Создать slash-команды
 
-Скопировать из bootstrap (после ТЗ-1):
+Скопировать из bootstrap через helper:
 ```bash
 mkdir -p .claude/commands
-cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/handoff.md .claude/commands/
-cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/resume.md .claude/commands/
-cp ~/ClaudeCode/web-dev-bootstrap/.claude/commands/catchup.md .claude/commands/
+BOOTSTRAP_GET .claude/commands/handoff.md .claude/commands/handoff.md
+BOOTSTRAP_GET .claude/commands/resume.md .claude/commands/resume.md
+BOOTSTRAP_GET .claude/commands/catchup.md .claude/commands/catchup.md
 ```
 
 ### 5.2. Скопировать stop-reminder hook + обновить settings.json
@@ -608,12 +696,12 @@ Stop-хук — мягкое напоминание про `/handoff`, если 
 
 ```bash
 # Скопировать сам хук
-cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/stop-reminder.sh .claude/hooks/
+BOOTSTRAP_GET .claude/hooks/stop-reminder.sh .claude/hooks/stop-reminder.sh
 chmod +x .claude/hooks/stop-reminder.sh
 
 # Проверить, что session-start.sh пишет HEAD-sha в /tmp (нужно для stop-reminder):
 grep -q "session-start-sha" .claude/hooks/session-start.sh || \
-  cp ~/ClaudeCode/web-dev-bootstrap/.claude/hooks/session-start.sh .claude/hooks/
+  BOOTSTRAP_GET .claude/hooks/session-start.sh .claude/hooks/session-start.sh
 chmod +x .claude/hooks/session-start.sh
 ```
 
@@ -636,7 +724,15 @@ chmod +x .claude/hooks/session-start.sh
 }
 ```
 
-⚠️ Не перезаписывай весь `settings.json` целиком — у проекта могут быть свои hooks или permissions. Делай **диф-мерж**: сравни через `diff .claude/settings.json ~/ClaudeCode/web-dev-bootstrap/.claude/settings.json`, перенеси только отсутствующие блоки.
+⚠️ Не перезаписывай весь `settings.json` целиком — у проекта могут быть свои hooks или permissions. Делай **диф-мерж**:
+
+```bash
+# Скачай актуальный settings.json из bootstrap'а во временное место для сравнения:
+BOOTSTRAP_GET .claude/settings.json /tmp/bootstrap-settings.json
+diff .claude/settings.json /tmp/bootstrap-settings.json
+# Перенеси только отсутствующие блоки (Stop hook, новые permissions) в проектный settings.json
+rm /tmp/bootstrap-settings.json
+```
 
 Закоммитить: `chore: add stop-reminder hook + register Stop event`.
 
@@ -716,11 +812,20 @@ chmod +x .claude/hooks/session-start.sh
 
 Шаги:
 
-1. **Установить Caddy.** Лучше всего — прогнать обновлённый `bootstrap-vps.sh` (он проверит, что Caddy установлен из cloudsmith-репо и базовый `/etc/caddy/Caddyfile` собран):
+1. **Установить Caddy.** Лучше всего — прогнать обновлённый `bootstrap-vps.sh` (он проверит, что Caddy установлен из cloudsmith-репо и базовый `/etc/caddy/Caddyfile` собран). Запуск с локального bootstrap-репо:
+
    ```bash
    ssh root@{vps-ip} 'CADDY_ADMIN_EMAIL=admin@example.com bash -s' \
      < ~/ClaudeCode/web-dev-bootstrap/scripts/bootstrap-vps.sh
    ```
+
+   Если bootstrap локально нет — стримить с GitHub raw:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.0/scripts/bootstrap-vps.sh \
+     | ssh root@{vps-ip} 'CADDY_ADMIN_EMAIL=admin@example.com bash -s'
+   ```
+
    Скрипт идемпотентен: уже установленные node/pm2/ufw не тронет, но добавит `caddy` и базовый Caddyfile с `import /etc/caddy/Caddyfile.d/*.caddy`.
 
 2. **Для каждого сайта на VPS** перепиши nginx-vhost в Caddy-блок по шаблону из `~/ClaudeCode/web-dev-bootstrap/docs/server-add-site.md` § 4 (`reverse_proxy localhost:{port}` + `encode gzip zstd` + `@static path` + `@html path`). Положи в `/etc/caddy/Caddyfile.d/{site}.caddy`. Бэкап старого vhost-конфига держи **вне** `Caddyfile.d/` — иначе `caddy validate` подхватит `*.bak` и упадёт.
