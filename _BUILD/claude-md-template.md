@@ -17,7 +17,7 @@ CLAUDE.md template — скопируй как `CLAUDE.md` в корень но�
 
 Next.js 16 (App Router, Turbopack) + Tailwind v4 + shadcn/ui (base-ui) + TypeScript
 Tooling: Biome (lint+format), pnpm (через corepack/mise), schema-dts для JSON-LD типов
-Forms: React Hook Form + Zod → Server Action `submitLead` → CRM (with `data/leads.json` fallback)
+Forms: React Hook Form + Zod → Server Action `submitLead` → multi-sink (Google Sheets / Telegram / CRM) через `Promise.allSettled`, с JSON-fallback если все упали
 Content: MDX (no database)
 Dev: локально на Mac, `pnpm dev` на `localhost:3000`
 Deploy: git push → GitHub Actions → PM2 + Caddy (встроенный ACME) на VPS (см. docs/deploy.md)
