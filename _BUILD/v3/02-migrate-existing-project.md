@@ -374,9 +374,26 @@ pnpm build
 
 Закоммитить: `chore: enable standalone output`.
 
-### 3.2. Server Action вместо `/api/lead`
+### 3.2. Server Action + Cloudflare Turnstile (один шаг)
 
-Если в проекте есть `app/api/lead/route.ts` — мигрируем на Server Action.
+> ⚠️ **Server Action и Turnstile делаются вместе в одном коммите.** Server Action в схеме требует обязательный `turnstileToken` (проверка ДО CRM, иначе сломанная CRM = открытый канал для ботов), а виджет Turnstile добавляет токен в форму. Если разделить шаги — между коммитами форма будет валиться Zod-валидацией на пустом токене.
+
+Если `app/api/lead/route.ts` в проекте нет (например, проект уже частично на Server Action) — пропусти подшаг (б), сразу к (в).
+
+#### а) Установить Turnstile
+
+1. Получить site-key и secret-key (Cloudflare → Turnstile → Add Site).
+2. Установить пакет:
+   ```bash
+   pnpm add @marsidev/react-turnstile
+   ```
+3. В `.env.local` (не коммитить — gitignored):
+   ```
+   NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4...
+   TURNSTILE_SECRET_KEY=0x4...
+   ```
+
+#### б) Создать Server Action
 
 Создать `app/actions/submit-lead.ts`:
 ```typescript
@@ -429,77 +446,66 @@ export async function submitLead(_prev: unknown, formData: FormData) {
 }
 ```
 
-В клиентских формах (`ConsultationDialog.tsx`, `LeadForm.tsx`) — заменить `fetch('/api/lead', ...)` на:
+#### в) Найти все формы в проекте
+
+Чтобы не пропустить ни одну:
+```bash
+# Все компоненты с формой:
+grep -rln 'useForm\|<form\|action=' app/ components/ 2>/dev/null
+
+# Все клиентские компоненты с submit-handler'ами:
+grep -rln '"use client"' app/ components/ 2>/dev/null | xargs grep -l 'onSubmit\|formAction' 2>/dev/null
+```
+Типичные кандидаты: `ConsultationDialog.tsx`, `LeadForm.tsx`, `ContactForm.tsx`, footer-форма, форма квиза.
+
+#### г) В каждой найденной форме: Turnstile widget + переключение на `useActionState`
+
+Заменить `fetch('/api/lead', ...)` на форму с виджетом и Server Action:
 ```typescript
 'use client'
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
+import { Turnstile } from '@marsidev/react-turnstile'
 import { submitLead } from '@/app/actions/submit-lead'
 
 const [state, formAction, isPending] = useActionState(submitLead, null)
-// ...
-<form action={formAction}>
-  {/* ... поля ... */}
-  <button type="submit" disabled={isPending}>
-    {isPending ? 'Отправка...' : 'Отправить'}
-  </button>
-</form>
+const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
 
-{state?.error && <p className="text-red-500">{state.error}</p>}
-{state?.success && <p className="text-green-500">Заявка отправлена!</p>}
+return (
+  <>
+    <form action={formAction}>
+      {/* ... поля name/phone/email/message/source/consent ... */}
+
+      <Turnstile
+        siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
+        options={{ theme: 'light', size: 'flexible' }}
+        onSuccess={(token) => setTurnstileToken(token)}
+      />
+      <input type="hidden" name="turnstileToken" value={turnstileToken ?? ''} />
+
+      <button type="submit" disabled={!turnstileToken || isPending}>
+        {isPending ? 'Отправка...' : 'Отправить'}
+      </button>
+    </form>
+
+    {state?.error && <p className="text-red-500">{state.error}</p>}
+    {state?.success && <p className="text-green-500">Заявка отправлена!</p>}
+  </>
+)
 ```
 
-После успешной миграции — удалить `app/api/lead/route.ts`:
+#### д) Удалить старый Route Handler
+
 ```bash
 rm app/api/lead/route.ts
 ```
 
-Проверить локально: открыть форму, отправить → лид должен дойти в CRM (или fallback в `data/leads.json`).
+#### е) Проверить локально
 
-Закоммитить: `refactor: migrate /api/lead to Server Action with Turnstile`.
+Открой каждую форму, дождись прогрузки Turnstile-виджета (~1 сек), submit — лид должен дойти в CRM (или в `data/leads.json` fallback при отвалившейся CRM). Если виджет не показывается — проверь `NEXT_PUBLIC_TURNSTILE_SITE_KEY` в `.env.local` (`console.log(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY)` в клиентском коде).
 
-### 3.3. Cloudflare Turnstile
+Закоммитить **одним коммитом** (Server Action + Turnstile вместе): `refactor: migrate /api/lead to Server Action with Turnstile`.
 
-Если в проекте Turnstile ещё не подключён:
-
-1. Получить site-key и secret-key (Cloudflare → Turnstile → Add Site)
-2. Установить:
-   ```bash
-   pnpm add @marsidev/react-turnstile
-   ```
-3. В `.env.local` (не коммитить!):
-   ```
-   NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4...
-   TURNSTILE_SECRET_KEY=0x4...
-   ```
-4. **Найти все формы в проекте**, чтобы не пропустить ни одну:
-   ```bash
-   # Все компоненты с формой:
-   grep -rln 'useForm\|<form\|action=' app/ components/ 2>/dev/null
-
-   # Все клиентские компоненты с submit-handler'ами:
-   grep -rln '"use client"' app/ components/ 2>/dev/null | xargs grep -l 'onSubmit\|formAction' 2>/dev/null
-   ```
-   Типичные кандидаты: `ConsultationDialog.tsx`, `LeadForm.tsx`, `ContactForm.tsx`, footer-форма, форма квиза.
-
-5. В **каждой** найденной форме добавить компонент Turnstile:
-   ```typescript
-   import { Turnstile } from '@marsidev/react-turnstile'
-   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
-
-   <Turnstile
-     siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
-     options={{ theme: 'light', size: 'flexible' }}
-     onSuccess={(token) => setTurnstileToken(token)}
-   />
-   <input type="hidden" name="turnstileToken" value={turnstileToken ?? ''} />
-   <button type="submit" disabled={!turnstileToken || isPending}>...</button>
-   ```
-
-6. Проверить локально: открой каждую форму, дождись прогрузки виджета (~1 сек), submit — должен пройти. Если виджет не показывается — проверь, что `NEXT_PUBLIC_TURNSTILE_SITE_KEY` доступен на клиенте (`console.log` в dev).
-
-Закоммитить: `feat: add Cloudflare Turnstile to all forms`.
-
-### 3.4. Content Collections (только если есть блог)
+### 3.3. Content Collections (только если есть блог)
 
 Пропусти этот шаг, если `content/blog/` не существует.
 
