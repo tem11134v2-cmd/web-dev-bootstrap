@@ -374,35 +374,58 @@ pnpm build
 
 Закоммитить: `chore: enable standalone output`.
 
-### 3.2. Server Action + Cloudflare Turnstile (один шаг)
+### 3.2. Server Action + Cloudflare Turnstile + multi-sink (один шаг)
 
-> ⚠️ **Server Action и Turnstile делаются вместе в одном коммите.** Server Action в схеме требует обязательный `turnstileToken` (проверка ДО CRM, иначе сломанная CRM = открытый канал для ботов), а виджет Turnstile добавляет токен в форму. Если разделить шаги — между коммитами форма будет валиться Zod-валидацией на пустом токене.
+> ⚠️ **Все три части делаются вместе в одном коммите.** Server Action в схеме требует обязательный `turnstileToken` (проверка ДО sinks, иначе сломанный sink = открытый канал для ботов), виджет Turnstile добавляет токен в форму, а multi-sink заменяет одиночный `sendToCRM` на `Promise.allSettled`. Если разделить шаги — между коммитами форма будет валиться Zod-валидацией на пустом токене или sinks-импорты будут broken.
 
-Если `app/api/lead/route.ts` в проекте нет (например, проект уже частично на Server Action) — пропусти подшаг (б), сразу к (в).
+Если `app/api/lead/route.ts` в проекте нет (например, проект уже частично на Server Action) — пропусти подшаг (в), сразу к (г).
 
-#### а) Установить Turnstile
+#### а) Установить Turnstile + sinks-зависимости
 
 1. Получить site-key и secret-key (Cloudflare → Turnstile → Add Site).
-2. Установить пакет:
+2. Установить пакеты:
    ```bash
-   pnpm add @marsidev/react-turnstile
+   pnpm add @marsidev/react-turnstile googleapis node-telegram-bot-api
+   pnpm add -D @types/node-telegram-bot-api
    ```
 3. В `.env.local` (не коммитить — gitignored):
    ```
+   # Turnstile (обязательно)
    NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4...
    TURNSTILE_SECRET_KEY=0x4...
+
+   # Sinks (опционально — заполняй когда подключаешь канал)
+   # GOOGLE_SHEETS_CLIENT_EMAIL=...
+   # GOOGLE_SHEETS_PRIVATE_KEY=...
+   # GOOGLE_SHEETS_SPREADSHEET_ID=...
+   # TG_BOT_TOKEN=...
+   # TG_CHAT_ID=...
    ```
 
-#### б) Создать Server Action
+   `googleapis` и `node-telegram-bot-api` устанавливаются заранее, даже если каналы пока не подключаешь — sink-функции импортируют их лениво и без env-переменных бросают `SinkSkipped`. Добавление каналов потом — просто env-переменные, без `pnpm add`.
 
-Создать `app/actions/submit-lead.ts`:
+#### б) Создать `lib/sinks/`
+
+Создать четыре файла в `lib/sinks/`:
+
+- `index.ts` — диспетчер с `LeadData`, `SinkSkipped`, `allSinks`, `classifySinkResults`
+- `sheets.ts` — Google Sheets через googleapis (с guard'ом `SinkSkipped` если ключей нет)
+- `telegram.ts` — Telegram Bot через node-telegram-bot-api (с guard'ом)
+- `crm.ts` — stub до реального подключения CRM (всегда бросает `SinkSkipped("CRM_NOT_CONFIGURED")`)
+
+Полные шаблоны кода — в `docs/forms-and-crm.md` § «Структура `lib/sinks/`» (читай оттуда, не дублируем 100 строк здесь). Если bootstrap клонирован локально — `cat ~/ClaudeCode/web-dev-bootstrap/docs/forms-and-crm.md`. Если нет — `https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.2/docs/forms-and-crm.md`.
+
+Если в проекте есть **старый** `lib/crm.ts` (одиночная CRM-функция) — её содержимое переезжает в `lib/sinks/crm.ts` (заменяя stub) с добавлением `SinkSkipped` guard'а в начале. Сам файл `lib/crm.ts` после миграции удалить.
+
+#### в) Создать `app/actions/submit-lead.ts`
+
 ```typescript
 'use server'
 import { z } from 'zod'
 import { headers } from 'next/headers'
-import { sendToCRM } from '@/lib/crm'
-import { appendFallback } from '@/lib/fallback'
 import { rateLimit } from '@/lib/rate-limit'
+import { appendFallback } from '@/lib/fallback'
+import { allSinks, classifySinkResults, type LeadData } from '@/lib/sinks'
 
 const schema = z.object({
   name: z.string().min(2),
@@ -410,20 +433,26 @@ const schema = z.object({
   email: z.string().email().optional(),
   message: z.string().optional(),
   source: z.string(),
-  consent: z.literal('true'),       // FormData приносит строку, не bool
-  turnstileToken: z.string().min(10),
+  consent: z.literal(true),
+  turnstileToken: z.string().min(1),
 })
 
-export async function submitLead(_prev: unknown, formData: FormData) {
+export type LeadState = { success: true } | { error: string } | null
+
+export async function submitLead(_prev: LeadState, formData: FormData): Promise<LeadState> {
   const ip = (await headers()).get('x-forwarded-for') ?? 'unknown'
   if (!rateLimit(ip, 1, 10_000)) {
     return { error: 'Слишком много запросов. Подождите минуту.' }
   }
 
-  const parsed = schema.safeParse(Object.fromEntries(formData))
+  const raw = Object.fromEntries(formData)
+  const parsed = schema.safeParse({
+    ...raw,
+    consent: raw.consent === 'on' || raw.consent === 'true',
+  })
   if (!parsed.success) return { error: 'Проверьте поля формы' }
 
-  // Turnstile
+  // Turnstile verify ДО sinks.
   const verify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -433,20 +462,39 @@ export async function submitLead(_prev: unknown, formData: FormData) {
       remoteip: ip,
     }),
   })
-  const result = await verify.json()
+  const result = (await verify.json()) as { success: boolean }
   if (!result.success) return { error: 'Защита от спама не пройдена' }
 
-  try {
-    await sendToCRM(parsed.data)
-  } catch (err) {
-    console.error('CRM error', err)
-    await appendFallback(parsed.data)
+  // Multi-sink: параллельная доставка во все настроенные каналы.
+  const leadData: LeadData = {
+    name: parsed.data.name,
+    phone: parsed.data.phone,
+    email: parsed.data.email,
+    message: parsed.data.message,
+    source: parsed.data.source,
   }
+  const results = await Promise.allSettled(allSinks.map((sink) => sink(leadData)))
+  const { successes, skips, failures } = classifySinkResults(results)
+
+  if (failures.length > 0) {
+    console.error('Lead sink failures:', failures.map((f) => (f as PromiseRejectedResult).reason))
+  }
+  if (successes.length === 0) {
+    await appendFallback(leadData)
+    if (failures.length === 0 && skips.length === allSinks.length) {
+      console.warn(
+        'All lead sinks are not configured. Set GOOGLE_SHEETS_*, TG_BOT_TOKEN, or AMO_CRM_* in .env to start receiving leads.',
+      )
+    }
+  }
+
   return { success: true }
 }
 ```
 
-#### в) Найти все формы в проекте
+Старый `app/api/lead/route.ts` (если был) удаляется в подшаге (д).
+
+#### г) Найти все формы в проекте
 
 Чтобы не пропустить ни одну:
 ```bash
@@ -458,7 +506,7 @@ grep -rln '"use client"' app/ components/ 2>/dev/null | xargs grep -l 'onSubmit\
 ```
 Типичные кандидаты: `ConsultationDialog.tsx`, `LeadForm.tsx`, `ContactForm.tsx`, footer-форма, форма квиза.
 
-#### г) В каждой найденной форме: Turnstile widget + переключение на `useActionState`
+#### д) В каждой найденной форме: Turnstile widget + переключение на `useActionState`
 
 Заменить `fetch('/api/lead', ...)` на форму с виджетом и Server Action:
 ```typescript
@@ -493,17 +541,31 @@ return (
 )
 ```
 
-#### д) Удалить старый Route Handler
+#### е) Удалить старый Route Handler
 
 ```bash
 rm app/api/lead/route.ts
 ```
 
-#### е) Проверить локально
+#### ж) Проверить локально
 
-Открой каждую форму, дождись прогрузки Turnstile-виджета (~1 сек), submit — лид должен дойти в CRM (или в `data/leads.json` fallback при отвалившейся CRM). Если виджет не показывается — проверь `NEXT_PUBLIC_TURNSTILE_SITE_KEY` в `.env.local` (`console.log(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY)` в клиентском коде).
+Открой каждую форму, дождись прогрузки Turnstile-виджета (~1 сек), submit. На этом этапе ни один sink ещё не настроен (env пустой по подшагу а) — лид должен сохраниться в `data/leads.json` через fallback. В консоли увидишь warning `All lead sinks are not configured. Set GOOGLE_SHEETS_*, TG_BOT_TOKEN, ...`.
 
-Закоммитить **одним коммитом** (Server Action + Turnstile вместе): `refactor: migrate /api/lead to Server Action with Turnstile`.
+Это **ожидаемо** — каналы подключаешь следующим шагом миграции (или после, в `specs/13-extend-site.md`). Главное — форма работает, Turnstile проходит, JSON-фоллбек страхует.
+
+Если виджет не показывается — проверь `NEXT_PUBLIC_TURNSTILE_SITE_KEY` в `.env.local` (`console.log(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY)` в клиентском коде).
+
+Закоммитить **одним коммитом** (Server Action + Turnstile + multi-sink вместе): `refactor: migrate /api/lead to Server Action with Turnstile + multi-sink leads`.
+
+#### Подключение каналов после миграции
+
+После того как Server Action + Turnstile + multi-sink работают, подключай sinks **по одному**, отдельными коммитами:
+
+1. **Sheets** — добавить `GOOGLE_SHEETS_*` env, проверить что лид попадает в таблицу.
+2. **Telegram** — добавить `TG_BOT_TOKEN` + `TG_CHAT_ID`, проверить что приходит сообщение в чат.
+3. **CRM** — заменить stub в `lib/sinks/crm.ts` на реальный код (см. `docs/forms-and-crm.md` § «CRM-интеграции»), добавить env.
+
+Каждое подключение — отдельный commit и отдельный test. Между коммитами форма продолжает работать (skipped sinks ничего не ломают). Подробности — в `specs/09-forms-crm.md` § «Sinks: подключение каналов».
 
 ### 3.3. Content Collections (только если есть блог)
 
