@@ -51,7 +51,7 @@
 
 8. Создать `app/actions/submit-lead.ts` с директивой `"use server"`:
    - Сигнатура `submitLead(prevState, formData: FormData) → LeadState` (тип `LeadState = { success: true } | { error: string } | null`)
-   - Rate limiting через `rateLimit(ip, 1, 10_000)` из `@/lib/rate-limit` (создан в шаге 7). 1 запрос в 10 секунд / IP
+   - Rate limiting через `rateLimit(ip, 10_000)` из `@/lib/rate-limit` (создан в шаге 7). 1 запрос в 10 секунд / IP
    - Парсинг FormData → объект → Zod-валидация (схема включает `turnstileToken: z.string().min(1)`). Чекбокс `consent` приходит как строка `"on"` — приводим к boolean **до** `safeParse`
    - **Turnstile verify ДО sinks** — POST на `https://challenges.cloudflare.com/turnstile/v0/siteverify` (тело `application/x-www-form-urlencoded`). При `result.success === false` — `return { error: "Защита от спама не пройдена" }`
    - **Параллельная доставка во все sinks** через `Promise.allSettled(allSinks.map(...))` + `classifySinkResults`

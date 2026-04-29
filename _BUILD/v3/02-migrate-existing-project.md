@@ -441,7 +441,7 @@ export type LeadState = { success: true } | { error: string } | null
 
 export async function submitLead(_prev: LeadState, formData: FormData): Promise<LeadState> {
   const ip = (await headers()).get('x-forwarded-for') ?? 'unknown'
-  if (!rateLimit(ip, 1, 10_000)) {
+  if (!rateLimit(ip, 10_000)) {
     return { error: 'Слишком много запросов. Подождите минуту.' }
   }
 
