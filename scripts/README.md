@@ -8,6 +8,7 @@
 | `bootstrap-vps.sh` | Разовая настройка свежего Ubuntu 22.04 / 24.04 VPS: deploy user, SSH hardening, ufw, fail2ban, swap, Node runtime + Caddy + PM2, папки. Под push-based deploy ни pnpm, ни git на VPS не ставит | `docs/server-manual-setup.md` |
 | `rollback.sh` | Атомарный откат прода: переключает симлинк `~/prod/{site}/current → releases/<previous-sha>/` + `pm2 reload`. Без пересборки, миллисекунды. Подсказывает корректный `git revert` (с `-m 1` для merge-коммитов) | `docs/automation.md` |
 | `sync-env.sh` | Fallback-инструмент: копирует локальный `~/projects/{site}/.env.production` на VPS, `chmod 600`, `pm2 restart --update-env`. В штатном flow `.env` пушит сам workflow из `PROD_ENV_FILE` Environment-секрета — sync-env.sh нужен только если Actions недоступны или надо подкинуть env между деплоями | `docs/automation.md` |
+| `fetch-env.sh` | Зеркало `sync-env.sh`: тянет активный `.env` с VPS в локальный `~/projects/{site}/.env.production`. Используется когда настраиваешь свежее устройство (новый Mac, потерял ноут) — VPS всегда содержит свежий файл из последнего workflow. Бэкапит существующий локальный файл перед перезаписью, `chmod 600`, печатает имена переменных (без значений) | `docs/automation.md` |
 
 ## Принципы
 
