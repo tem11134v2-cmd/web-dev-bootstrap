@@ -26,7 +26,6 @@ docs/                      — Knowledge Base (≤200 строк каждый)
   domain-connect.md          → A-записи, Cloudflare
 specs/                     — последовательность задач
   INDEX.md                   → граф зависимостей, как запускать спеку
-  00.5-new-project-init.md   → ритуал разработчика до запуска Claude
   00-brief.md
   01a-local-setup.md         → Mac: тулчейн, память
   01b-server-handoff.md      → Claude генерит deploy workflows + Caddy-шаблон
@@ -35,7 +34,7 @@ specs/                     — последовательность задач
   templates/                 → spec-template, page-spec-template
   examples/                  → живые образцы зрелых спек (референс формата)
 .claude/memory/            — шаблоны проектной памяти (INDEX + 6 файлов)
-_BUILD/                    — служебное: HOW-TO-START.md (+.docx), HANDBOOK.md (сборка для владельца),
+_BUILD/                    — служебное: HOW-TO-START.md (+.docx) — единый owner-guide,
                              claude-md-template.md, changelog.md, v3/ (refactor-ТЗ + миграционный промт + workflow-шаблоны)
 ```
 
@@ -44,7 +43,7 @@ _BUILD/                    — служебное: HOW-TO-START.md (+.docx), HAN
 1. **Разовая подготовка Mac (первый раз в жизни):** установи `mise` (`brew install gh mise`), активируй в zshrc, потом `mise use --global node@22 pnpm@latest`, залогинься в `gh auth login`, прокинь SSH-ключ на GitHub. Полный пошаговый чек-лист — `_BUILD/HOW-TO-START.md`.
 2. **Разовая подготовка VPS (первый раз для этого сервера):** пройди
    `docs/server-manual-setup.md` — создай пользователя, поставь стек, swap.
-3. **Старт нового сайта** — пройди `specs/00.5-new-project-init.md`:
+3. **Старт нового сайта** — следуй `_BUILD/HOW-TO-START.md` §1.A (новый сайт из шаблона):
    - Создай `~/projects/{site}/` на Mac.
    - Раскатай template: `gh repo create {owner}/{site} --template tem11134v2-cmd/web-dev-bootstrap --private --clone`.
    - Открой Claude Desktop, `Select folder` → эту папку.

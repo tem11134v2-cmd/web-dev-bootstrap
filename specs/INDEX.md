@@ -14,10 +14,11 @@ Before coding:
 
 ## Основной поток (00 → 13)
 
+> **Перед запуском любой спеки** разработчик уже прошёл `_BUILD/HOW-TO-START.md` §0-§3: установил mise + gh + git identity, создал папку и репо через `gh repo create --template`, открыл проект в Claude Desktop. Это *не спека*, а ручной ритуал — описан в HOW-TO, не дублируется в `specs/`.
+
 | № | Спека | Цель | Зависит от | Деплой после |
 |---|---|---|---|---|
-| — | `00.5-new-project-init.md` | **Ритуал для разработчика** (не для Claude): создать `~/projects/{site}`, GitHub-репо, открыть Claude Desktop в папке, заполнить `CLAUDE.md`. Проходится **до** всего остального | — | нет |
-| 00 | `00-brief.md` | Принять материалы заказчика, разложить в `docs/spec.md`, `docs/content.md`, `docs/pages.md`, `docs/integrations.md` | 00.5 | нет |
+| 00 | `00-brief.md` | Принять материалы заказчика, разложить в `docs/spec.md`, `docs/content.md`, `docs/pages.md`, `docs/integrations.md` | HOW-TO §0-§3 | нет |
 | 01a | `01a-local-setup.md` | Проверить тулчейн на Mac (node, pnpm, git, gh), git-идентичность, SSH к GitHub, `.tool-versions`, зафиксировать в memory | 00 | нет |
 | 01b | `01b-server-handoff.md` | Сгенерировать в репо: `.github/workflows/deploy-*.yml` (push-based по шаблону из `_BUILD/v3/templates/`), `deploy/{site}.caddy.example`, `deploy/README.md` (чек-лист для человека: SSH-ключ, GitHub Environment Secrets, mkdir releases/). Пользователь сам поднимает VPS по `docs/server-manual-setup.md` + `docs/server-add-site.md` | 01a | сервер готов принять билд |
 | 02 | `02-project-init.md` | `create-next-app`, структура папок, базовые зависимости, скрипты, scaffold | 01a (01b параллельно — пока пользователь настраивает сервер) | первый билд (пустой) |
@@ -37,10 +38,12 @@ Before coding:
 **Граф зависимостей (текстом):**
 
 ```
-00.5 (ты сам) → 00 → 01a ─┬─→ 02 → 03 → 04 → 05 → 06 ─┬─→ 08 ─→ 11 → 12 → 13 (loop)
-                          │                           ├─→ 09 ─→ 10 ─→ 11
-                          │                           └─→ 07 (опционально, после 02)
-                          └─→ 01b (параллельно 02–06, пока ты настраиваешь VPS)
+[HOW-TO §0-§3 — установка Mac, gh repo create, открыть в Claude]
+       ↓
+       00 → 01a ─┬─→ 02 → 03 → 04 → 05 → 06 ─┬─→ 08 ─→ 11 → 12 → 13 (loop)
+                 │                           ├─→ 09 ─→ 10 ─→ 11
+                 │                           └─→ 07 (опционально, после 02)
+                 └─→ 01b (параллельно 02–06, пока ты настраиваешь VPS)
 ```
 
 `01b` блокирует только **первый deploy** — Claude и пользователь могут делать 02–06 локально, пока VPS готовится. К моменту 04 (одобрение заказчика) сервер уже должен принимать push.
