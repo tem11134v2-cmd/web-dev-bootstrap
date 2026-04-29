@@ -48,8 +48,12 @@
 
 ### Outstanding после v3.0 (не блокируют тег)
 
-- ⏳ Регенерация `_BUILD/HOW-TO-START.docx` через pandoc (текущий синхронизирован с v2.2.1; pandoc-конвертация требует ручного причёсывания стилей/оглавления — отдельный таск).
 - ⏳ Первый реальный push-based деплой на live-VPS — Phase 5 покрыта только письменной верификацией + rollback-планом, не обкатывалась.
+
+### Done после v3.0
+
+- ✅ Регенерация `_BUILD/HOW-TO-START.docx` под v3.0 (PR #16 + #18: §1.5/§3.5/§4/§10 fixes), команда регенерации зафиксирована в шапке `_BUILD/HOW-TO-START.md`.
+- ✅ `_BUILD/HANDBOOK.md` (PR #19) — сборный owner-документ из 6 источников через `scripts/build-handbook.sh`.
 
 ## v3.0-deploy — 2026-04-28 · Push-based deploy + standalone + раздельные SSH-ключи
 
