@@ -117,8 +117,8 @@ docs/integrations.md  — CRM, analytics, domain, external services
 ## Specs
 
 Task specs in `specs/` folder. Execute one per session.
-- `specs/INDEX.md` — sequence (00.5 → 00 → 01a → 01b → 02 … → 13), dependency graph
-- `specs/00.5-new-project-init.md` — ритуал разработчика (делается до Claude)
+- `specs/INDEX.md` — sequence (00 → 01a → 01b → 02 … → 13), dependency graph
+- `_BUILD/HOW-TO-START.md` §0-§3 — ритуал разработчика до запуска Claude (установка Mac, создание репо, первое сообщение)
 - `specs/optional/` — quiz, ecommerce, i18n, migrate-from-existing
 - `specs/templates/spec-template.md` and `page-spec-template.md` — copy when starting new specs
 - `specs/examples/` — mature spec examples from a real project (reference, not tasks)

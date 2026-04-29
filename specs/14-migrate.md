@@ -122,7 +122,7 @@
 ## Для M4 (клон на другой домен)
 
 - `gh repo create --template <source-repo> tem11134v2-cmd/{new-site} --private --clone`.
-- Пройти как новый сайт по `specs/00.5 → 13`.
+- Пройти как новый сайт: `_BUILD/HOW-TO-START.md` §0-§3 → `specs/00 → 13`.
 - `docs/spec.md`, `content.md`, `pages.md`, `integrations.md` — переписать под новый продукт.
 - Новая пара портов, новая строка в `ports.md`, новый Caddy-конфиг в `Caddyfile.d/{new-site}.caddy`.
 - Отдельный GitHub Environment + Secrets под новый сайт (даже если он на том же VPS — `vars.SITE_NAME` другое, разделение чистое).
