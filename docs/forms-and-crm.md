@@ -139,7 +139,14 @@ export async function sendToSheets(data: LeadData): Promise<void> {
 3. Открыть таблицу в Google Sheets → Share → добавить service-account-email из JSON как **Editor**. Без этого API вернёт 403.
 4. Из JSON-ключа в `.env`:
    - `GOOGLE_SHEETS_CLIENT_EMAIL` = `client_email` поле JSON
-   - `GOOGLE_SHEETS_PRIVATE_KEY` = `private_key` поле JSON (с экранированными `\n` — оставляем как есть в `.env`)
+   - `GOOGLE_SHEETS_PRIVATE_KEY` = `private_key` поле JSON. **Важно:** оборачивай значение в **двойные кавычки** и оставляй литеральные `\n` — sink в runtime сделает `.replace(/\\n/g, "\n")`.
+
+   **Правильно:**
+   ```bash
+   GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
+   ```
+   Без двойных кавычек либо с одинарными — Next.js dotenv / heredoc-парсер `PROD_ENV_FILE` секрета на VPS обработают `\n` непредсказуемо, и Google API вернёт `error:0480006C:PEM routines::no start line` или `invalid_grant: Invalid JWT Signature`.
+
 5. `GOOGLE_SHEETS_SPREADSHEET_ID` — из URL таблицы: `docs.google.com/spreadsheets/d/<ВОТ-ЭТО>/edit`.
 6. (Опционально) `GOOGLE_SHEETS_TAB_NAME` — имя листа, дефолт `Leads`.
 
@@ -152,15 +159,6 @@ export async function sendToSheets(data: LeadData): Promise<void> {
 import TelegramBot from "node-telegram-bot-api";
 import { SinkSkipped, type LeadData } from "./index";
 
-let cachedBot: TelegramBot | null = null;
-
-function getBot(token: string): TelegramBot {
-  if (!cachedBot) {
-    cachedBot = new TelegramBot(token, { polling: false });
-  }
-  return cachedBot;
-}
-
 export async function sendToTelegram(data: LeadData): Promise<void> {
   const token = process.env.TG_BOT_TOKEN;
   const chatId = process.env.TG_CHAT_ID;
@@ -168,6 +166,11 @@ export async function sendToTelegram(data: LeadData): Promise<void> {
   if (!token || !chatId) {
     throw new SinkSkipped("TELEGRAM_NOT_CONFIGURED");
   }
+
+  // Создаём bot inline на каждый вызов: {polling: false} — это просто обёртка
+  // над token, дешёвая (~µs). Module-level singleton не нужен и плохо себя ведёт
+  // в Next.js Server Actions при HMR / multi-worker PM2.
+  const bot = new TelegramBot(token, { polling: false });
 
   const text = [
     "<b>🆕 Новая заявка</b>",
@@ -180,7 +183,7 @@ export async function sendToTelegram(data: LeadData): Promise<void> {
     .filter(Boolean)
     .join("\n");
 
-  await getBot(token).sendMessage(chatId, text, { parse_mode: "HTML" });
+  await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
 }
 
 function escapeHtml(s: string): string {
@@ -228,6 +231,101 @@ export async function sendToCRM(data: LeadData): Promise<void> {
 ```
 
 **Готовые шаблоны для CRM — в конце этого файла.** Когда придёт время — копируешь нужный шаблон в `lib/sinks/crm.ts`, добавляешь env-переменные, тестируешь.
+
+## Helpers — `lib/rate-limit.ts` и `lib/fallback.ts`
+
+Server Action импортирует две утилиты, которые **не sinks**, но критичны для надёжности воронки:
+
+- `rateLimit` — отсекает дребезг submit'ов с одного IP (в дополнение к Turnstile).
+- `appendFallback` — пишет лид в `data/leads.json` если все sinks не приняли (последний рубеж).
+
+Эти файлы создаются **вместе с `lib/sinks/`** в spec 09. Без них Server Action не скомпилируется — `Module not found: '@/lib/rate-limit'`.
+
+### `lib/rate-limit.ts`
+
+```typescript
+// lib/rate-limit.ts
+//
+// In-memory rate-limit per IP. Достаточно для single-instance PM2 (default
+// в bootstrap'е). При cluster-mode у каждого worker'а будет свой Map —
+// rate-limit станет нестрогим, но Turnstile + appendFallback всё равно
+// предотвратят утечку лидов; за реальной защитой нужен Redis или подобное.
+
+const hits = new Map<string, number>();
+
+/**
+ * @param ip — IP клиента (из x-forwarded-for header).
+ * @param maxRequests — максимум запросов за интервал. Обычно 1.
+ * @param windowMs — длина окна в миллисекундах. Обычно 10_000 (10s).
+ * @returns true если запрос разрешён, false если бить throttle.
+ */
+export function rateLimit(ip: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  const lastHit = hits.get(ip) ?? 0;
+
+  if (now - lastHit < windowMs) {
+    return false;
+  }
+
+  hits.set(ip, now);
+
+  // Cleanup старых записей при росте map'а (не блокировать процесс на каждом запросе)
+  if (hits.size > 1000) {
+    for (const [storedIp, timestamp] of hits) {
+      if (now - timestamp > windowMs * 10) {
+        hits.delete(storedIp);
+      }
+    }
+  }
+
+  return true;
+}
+```
+
+`maxRequests` параметр — для будущей гибкости (если захотим разрешать 3 submit'а в минуту вместо 1 в 10 секунд). Сейчас Server Action вызывает `rateLimit(ip, 1, 10_000)` — один в 10 секунд.
+
+### `lib/fallback.ts`
+
+```typescript
+// lib/fallback.ts
+//
+// Последний рубеж: если все sinks не приняли лид (упали или skipped),
+// сохраняем в data/leads.json. Файл gitignored (.env*-style правило в
+// .gitignore). После починки sinks-каналов можно вручную восстановить
+// потерянные лиды из этого файла.
+
+import { promises as fs } from "fs";
+import path from "path";
+import type { LeadData } from "./sinks";
+
+const FALLBACK_PATH = path.join(process.cwd(), "data", "leads.json");
+
+type FallbackEntry = LeadData & { savedAt: string };
+
+export async function appendFallback(data: LeadData): Promise<void> {
+  const entry: FallbackEntry = { ...data, savedAt: new Date().toISOString() };
+
+  let existing: FallbackEntry[] = [];
+  try {
+    const text = await fs.readFile(FALLBACK_PATH, "utf-8");
+    existing = JSON.parse(text);
+    if (!Array.isArray(existing)) existing = [];
+  } catch {
+    // Файл ещё не создан — нормально для свежего проекта.
+  }
+
+  existing.push(entry);
+
+  await fs.mkdir(path.dirname(FALLBACK_PATH), { recursive: true });
+  await fs.writeFile(FALLBACK_PATH, JSON.stringify(existing, null, 2), "utf-8");
+}
+```
+
+Концепции:
+
+- **Read-modify-write не atomic** — при двух одновременных вызовах одна запись теоретически может потеряться. На лендингах с одним лидом в минуту это нерелевантно. Если случится бот-атака с 10+ одновременными прорывами Turnstile — пара лидов может пропасть из JSON, но они всё равно дошли в Sheets/Telegram (они попадают в JSON только если **все** sinks упали, что само по себе аномалия).
+- **`data/leads.json` — gitignored** через шаблон `.gitignore` bootstrap'а (`data/leads.json` строкой). Никогда не коммитится — там персональные данные клиентов.
+- **Чтение для восстановления:** `cat ~/prod/{site}/current/data/leads.json | jq` на VPS. Если сайт работает на свежем релизе — это файл с лидами после последнего деплоя; старые релизы хранятся в `releases/<sha>/data/leads.json`.
 
 ## Server Action
 
