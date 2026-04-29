@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.2 — 2026-04-29 · Multi-sink lead architecture (Sheets + Telegram + CRM)
+
+Архитектурный апгрейд воронки лидов в шаблоне. До v3.2 дефолтный `submitLead` отправлял лид через **один абстрактный канал** (`sendToCRM`) с fallback в `data/leads.json`. Это было адекватно для проектов с одной CRM, но не покрывало реальный сценарий «лид одновременно в Google Sheets + Telegram + CRM», который владелец ведёт сам или с командой.
+
+С v3.2 шаблон по умолчанию проектирует Server Action под **multi-sink доставку** через `Promise.allSettled`: каналы независимы, упавший Telegram не ломает Sheets, неподключённый канал silently skipped, fallback в JSON срабатывает только когда **все** sinks не приняли лид. Подключать каналы можно постепенно — добавил env-переменные для Sheets, поработал, добавил Telegram, потом подключил CRM.
+
+- **`docs/forms-and-crm.md` переписан** под multi-sink архитектуру. Новая ASCII-схема показывает поток: `Promise.allSettled([sheets, telegram, crm])` → `classifySinkResults` → fallback в JSON только если `successes.length === 0`. Полные шаблоны кода для четырёх файлов: `lib/sinks/index.ts` (диспетчер с `LeadData` + `SinkSkipped`-классом + `allSinks`-массивом + `classifySinkResults`-helper'ом), `lib/sinks/sheets.ts` (через `googleapis` + JWT service account), `lib/sinks/telegram.ts` (через `node-telegram-bot-api` с `polling: false`), `lib/sinks/crm.ts` (stub до реального подключения, всегда бросает `SinkSkipped("CRM_NOT_CONFIGURED")`). Включены инструкции pre-req для каждого канала: как создать service account в Google Cloud → расшарить таблицу, как получить `TG_BOT_TOKEN`/`TG_CHAT_ID` через `@BotFather` и `@userinfobot`/`getUpdates`. Готовые шаблоны CRM (AmoCRM, Bitrix24) теперь как drop-in замена для `lib/sinks/crm.ts` stub'а.
+- **Server Action snippet обновлён.** Импорт `allSinks`, `classifySinkResults`, `SinkSkipped` из `@/lib/sinks` вместо `sendToCRM` из `@/lib/crm`. Поток: rate-limit → валидация → Turnstile verify (как было) → `Promise.allSettled(allSinks.map(...))` → разделение результатов на successes/skips/failures → `console.error` для real failures, `console.warn` если все skipped (env пустой), `appendFallback` только если `successes.length === 0`. Возвращает `{ success: true }` пользователю всегда — fallback страхует, паниковать незачем.
+- **`specs/09-forms-crm.md` переписан** — Goal сменился с «Server Action + CRM-интеграция + fallback в JSON» на «multi-sink доставка лидов + юридическое». Tasks теперь: §2 Создать `lib/sinks/`-структуру (новое), §3 Server Action с `Promise.allSettled` (новое), §4 Подключение каналов в порядке Sheets → Telegram → CRM (новое), §8 Тестирование расширено на три сценария — full env / partial env / empty env (всё через JSON fallback). Boundaries добавили правила «skip vs fail различать через `SinkSkipped`» и «не возвращать `error` при упавшем sink — fallback страхует».
+- **`docs/stack.md` обновлён** — `googleapis` и `node-telegram-bot-api` (+ `@types/node-telegram-bot-api` devDep) добавлены во вспомогательные пакеты. Ставятся в spec 09 при подключении каналов, не входят в дефолтный init step (потому что не каждый сайт подключает все каналы).
+- **`CLAUDE.md` и `_BUILD/claude-md-template.md` Forms-строка обновлена** на `Server Action submitLead → multi-sink (Google Sheets / Telegram / CRM) через Promise.allSettled, с JSON-fallback если все упали`. Эта строка попадает в context каждой Claude-сессии при старте — несоответствие создавало бы ложную картину архитектуры.
+- **`_BUILD/v3/02-migrate-existing-project.md` § 3.2 расширен** с 6 подшагов до 7 (а-ж): добавлены установка `googleapis`/`node-telegram-bot-api` в подшаг (а), создание `lib/sinks/`-структуры в новом подшаге (б), Server Action с `Promise.allSettled` в подшаге (в). Подшаг (ж) «Проверить локально» уточняет: на этом этапе ни один sink ещё не настроен → лид сохраняется в `data/leads.json` через fallback с понятным warning, **это ожидаемо** — каналы подключаются после миграции отдельными коммитами. Дополнительная секция «Подключение каналов после миграции» описывает порядок Sheets → Telegram → CRM. Если у проекта был старый `lib/crm.ts` — его содержимое переезжает в `lib/sinks/crm.ts` (заменяя stub) с добавлением `SinkSkipped`-guard'а.
+
+### Что НЕ затронуто
+
+- Клиентские формы (`useActionState` + Turnstile + `<form action={formAction}>`) — multi-sink это серверная кухня, клиенту не видна.
+- Архитектура Turnstile-верификации — без изменений.
+- `data/leads.json` fallback — остаётся как был, только теперь срабатывает реже (только когда **все** sinks не приняли лид, а не «когда CRM упала»).
+- Существующие проекты на v3.0/v3.1 продолжают работать без изменений (один `sendToCRM` + JSON fallback). Миграция на multi-sink — точечная и описана в `_BUILD/v3/02-migrate-existing-project.md` § 3.2.
+
 ## v3.1 — 2026-04-29 · Unified HOW-TO + fetch-env helper
 
 UX-доводка после полного аудита v3.0 свежим взглядом. Главные изменения — для **человека**, не для Claude: вся практическая инструкция теперь в одном файле, а ритуал «новый Mac → рабочий проект» сжат до одной команды.
