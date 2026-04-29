@@ -26,13 +26,13 @@
 
 **Ограничение (важно):** `PreToolUse` хук перехватывает **только то, что Claude делает через Bash-tool** в активной сессии. Прямой `git push` пользователя в обычном терминале — мимо хука. Это страховка от ошибок Claude, **не** immutable защита репо. Полную защиту даёт branch protection, но она недоступна на private + free GitHub плане (см. `docs/troubleshooting.md`).
 
-### `guard-rm.sh` — PreToolUse (matcher: Bash) — был раньше
+### `guard-rm.sh` — PreToolUse (matcher: Bash)
 
 Блокирует деструктивные команды:
 - `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf *`
 - `git push --force` (любой)
 
-### `format.sh` — PostToolUse (matcher: Edit|Write|MultiEdit) — был раньше
+### `format.sh` — PostToolUse (matcher: Edit|Write|MultiEdit)
 
 Запускает `biome check --write` на каждый изменённый `.ts/.tsx/.js/.jsx/.mjs/.cjs/.json/.md/.mdx/.css` файл. Молча, без вывода. Если Biome не установлен (нет `node_modules/.bin/biome`) — пропускает.
 
