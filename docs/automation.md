@@ -53,6 +53,23 @@
 
 Спрашивает подтверждение `[y/N]` перед scp. Сразу предупреждает, что следующий push в main перезапишет значение из `PROD_ENV_FILE` секрета.
 
+### `scripts/fetch-env.sh [site] [ssh_alias]` — для свежего устройства
+
+Зеркало `sync-env.sh` в обратную сторону: тянет активный `.env` с VPS в локальный `~/projects/{site}/.env.production`. Используется ровно один раз — когда настраиваешь свежее устройство (новый Mac, потерял ноут, второй компьютер) и нужен рабочий `.env.production` для локального prod-like запуска.
+
+Зачем именно VPS как источник истины:
+- Actions на каждом push пишет `releases/<sha>/.env` из `PROD_ENV_FILE` Environment-секрета — это всегда самая свежая plain-text копия, какая существует. GitHub Secrets хранятся зашифрованными, прочитать обратно нельзя даже владельцу.
+- `.env.production` намеренно gitignored — серверные секреты (Turnstile secret, Sheets service account, Telegram bot token, CRM credentials) не попадают в git history.
+
+Поведение:
+- Идемпотентно, `set -euo pipefail`.
+- Проверяет SSH-доступ ДО локальных правок (если упало — даёт понятную инструкцию: `ssh-copy-id deploy@<vps-ip>` или панель провайдера).
+- Существующий локальный `.env.production` бэкапится как `.env.production.bak.<timestamp>` перед перезаписью.
+- `chmod 600` на результат.
+- В финале печатает **имена** переменных (без значений) — чтобы видеть что пришло, не светя секреты в shell history.
+
+Спрашивает подтверждение `[y/N]` перед скачиванием. Сайт по дефолту берётся из `package.json#name`, ssh_alias — `${site}` (нужен `Host {site}` в `~/.ssh/config`).
+
 ### `scripts/rollback.sh [site] [ssh_alias]`
 
 Откатывает прод на VPS на **предыдущий релиз** через атомарный switch симлинка `current → releases/<previous-sha>` + `pm2 reload`. Никакого git fetch, никакого pnpm install, никакого build — миллисекунды.
