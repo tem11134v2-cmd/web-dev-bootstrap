@@ -27,6 +27,8 @@
 - `tw-animate-css` — CSS-анимации для Tailwind v4
 - `content-collections` + `@content-collections/core` + `@content-collections/mdx` + `@content-collections/next` — типобезопасный MDX-стек для блога и контентных страниц. Заменяет связку `next-mdx-remote` + `gray-matter`. Frontmatter валидируется Zod-схемой в `content-collections.ts`, MDX компилируется на билде в `.content-collections/generated`. См. `specs/07-blog-optional.md`.
 - `@marsidev/react-turnstile` — клиент Cloudflare Turnstile (антиспам форм). Серверная часть — fetch на `challenges.cloudflare.com/turnstile/v0/siteverify` без сторонних либ. Подробности — `docs/forms-and-crm.md` § «Антиспам — Cloudflare Turnstile».
+- `googleapis` — official Google API client для серверного sink'а Google Sheets (`lib/sinks/sheets.ts`). JWT auth через service account credentials. Ставится в spec 09 при подключении канала Sheets. Не клиентский (server-only через `'use server'`).
+- `node-telegram-bot-api` (+ `@types/node-telegram-bot-api` devDep) — Telegram Bot API клиент для серверного sink'а Telegram (`lib/sinks/telegram.ts`). Используется с `polling: false` (нам нужен только sendMessage, polling не нужен). Ставится в spec 09 при подключении канала Telegram.
 - `schema-dts` (devDep) — типы Schema.org от Google. Используется в `lib/schema.ts` для типобезопасных JSON-LD генераторов: `WithContext<Service>`, `WithContext<Article>`, `WithContext<BreadcrumbList>`. Опечатка в `@type` или поле — TypeScript-ошибка на билде, а не «странный warning в Yandex Validator уже на проде».
 
 ## Почему этот стек
