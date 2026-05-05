@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.3 — 2026-05-05 · Rolling migration + meta cleanup
+
+Чистка после самостоятельного аудита: устранены P0 в описаниях и расхождения между файлами после v3.1 / v3.2 sweeps. Архитектурно ничего не менялось — стек тот же, только описания приведены к реальности.
+
+- **Миграция переключена на rolling-main.** До этого `_BUILD/v3/02-migrate-existing-project.md` хардкодил `BOOTSTRAP_TAG=v3.0` и URL'ы `/v3.0/` (плюс один битый `/v3.2/`, тег которого не существует). После v3.2 пользователи, мигрирующие старые проекты, получали v3.0-замороженные шаги без multi-sink. Теперь `BOOTSTRAP_TAG` по дефолту `main`, все хардкод-ссылки в migration-ТЗ и `_BUILD/HOW-TO-START.md` § 10 переведены на `/main/`. Пояснительный текст переписан: «миграция использует актуальный main, фиксы подхватятся автоматически; для долгой миграции в несколько дней можно зафиксировать на конкретный sha через `BOOTSTRAP_TAG=<sha>`». `git clone --branch v3.0` в § 10.6 убран — клонируется default main.
+- **Build-описание в CLAUDE.md.** В `## Commands` корневого `CLAUDE.md` и `_BUILD/claude-md-template.md` строка `pnpm build — production build (собирается на VPS после git pull)` устарела с Phase 5 (push-based deploy перенёс build на GitHub-runner). Шаблон копируется в новые сайты — каждая Claude-сессия в новом проекте получала устаревшее описание в context. Заменено на `собирается на GitHub-runner, rsync-ится на VPS как standalone-артефакт`.
+- **CLAUDE.md Rules — site-mode guard.** Добавлена вводная строка к `## Rules`, явно указывающая, что правила (включая `Work on dev branch`) применяются только в site-режиме. В bootstrap-режиме (placeholder `# Project: [Name]`) — следуй META-инструкции в HTML-комментарии, где другая ветка `feature/{тема}`. Это снимает внутреннее противоречие, отложенное в v3.1 «как отдельное обсуждение», без расщепления файла на два.
+- **`docs/automation.md` догнал `docs/INDEX.md`.** INDEX обещал в automation.md пять хуков и три slash-команды, фактически были описаны только четыре хука (без `stop-reminder.sh`) и ноль slash-команд. Добавлен раздел про `stop-reminder.sh` (Stop event, PPID-isolation, sha-diff фильтр от спама, never-blocks). Добавлен раздел `## Slash-команды` — таблица `/resume` / `/handoff` / `/catchup` с when-to-call и what-they-do.
+- **`docs/INDEX.md` строка про bootstrap-vps.sh.** Заканчивалась `…deploy-ключ`. Phase 5 удалила генерацию deploy-keypair из `bootstrap-vps.sh` (приватный ключ теперь живёт только в GitHub Secrets, на VPS ssh-copy-id'ится только публичный). Заменено на актуальную форму: `Node runtime + Caddy + PM2`, без pnpm/git на VPS.
+- **Sync устаревших версий.** README H1 `v3.0 → v3.2`, блок «Версия» переписан под актуальный стек (включает multi-sink). README «pnpm через corepack на VPS» убран (Phase 5 убрала pnpm с VPS как класс). `CLAUDE.md` BOOTSTRAP META `v2.0 → v3.0` → `v2.0 → v3.2`. HOW-TO-START заголовок `v3.1 → v3.2`. `claude-md-template.md` `Дефолт v3.0 → Дефолт v3.2`.
+- **Tag-policy переоформлен под rolling.** В `CLAUDE.md` правило про теги переформулировано: rolling-main, теги ставятся только для major-вех (v4.0, v3.5 и т.п.), patch-уровень — без тегов. Снимает накопленный долг (в changelog есть v3.1 и v3.2 без соответствующих git-тегов — это норма при rolling-схеме).
+
+### Что НЕ затронуто
+
+- Архитектурно ничего: стек v3.2 (Caddy / push-deploy / Biome / pnpm / mise / Server Actions / Turnstile / Content Collections / multi-sink / multi-Claude протокол) сохранён без изменений.
+- Файлы скриптов (`scripts/*.sh`), хуков (`.claude/hooks/*.sh`), spec'ов (`specs/*.md`), KB-доков кроме `docs/INDEX.md` и `docs/automation.md`.
+- Существующие проекты на v3.0/v3.1/v3.2 ничего не теряют — это правки описаний bootstrap'а самого, не изменения копируемых артефактов (кроме `claude-md-template.md`, который применится только при следующем `gh repo create --template`).
+
 ## v3.2 — 2026-04-29 · Multi-sink lead architecture (Sheets + Telegram + CRM)
 
 Архитектурный апгрейд воронки лидов в шаблоне. До v3.2 дефолтный `submitLead` отправлял лид через **один абстрактный канал** (`sendToCRM`) с fallback в `data/leads.json`. Это было адекватно для проектов с одной CRM, но не покрывало реальный сценарий «лид одновременно в Google Sheets + Telegram + CRM», который владелец ведёт сам или с командой.
