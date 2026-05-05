@@ -17,7 +17,7 @@
 
 ```
 Прочитай файл ТЗ миграции по URL:
-https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.0/_BUILD/v3/02-migrate-existing-project.md
+https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/main/_BUILD/v3/02-migrate-existing-project.md
 
 Затем выполни его на этом проекте. Сначала покажи план миграции с учётом текущей
 версии проекта, жди подтверждения перед любыми правками.
@@ -46,7 +46,7 @@ https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.0/_BUILD/v
 # Использует локальный clone если есть, иначе скачивает с GitHub raw.
 
 BOOTSTRAP_LOCAL="${BOOTSTRAP_LOCAL:-$HOME/ClaudeCode/web-dev-bootstrap}"
-BOOTSTRAP_TAG="${BOOTSTRAP_TAG:-v3.0}"
+BOOTSTRAP_TAG="${BOOTSTRAP_TAG:-main}"
 BOOTSTRAP_RAW="https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/${BOOTSTRAP_TAG}"
 
 BOOTSTRAP_GET() {
@@ -92,11 +92,11 @@ BOOTSTRAP_GET _BUILD/v3/templates/deploy-prod.yml.example .github/workflows/depl
 BOOTSTRAP_GET scripts/rollback.sh scripts/rollback.sh && chmod +x scripts/rollback.sh
 ```
 
-`BOOTSTRAP_TAG=v3.0` означает: миграция всегда использует **зафиксированную версию** v3.0 bootstrap'а, даже если в `main` появятся правки. Это **намеренно** — чтобы поведение миграции было воспроизводимо. Если нужна более свежая версия (например, в bootstrap'е появился v3.1 с фиксами): `export BOOTSTRAP_TAG=v3.1` перед запуском миграции.
+`BOOTSTRAP_TAG=main` означает: миграция использует **актуальное состояние** bootstrap-репо. Все фиксы и улучшения, что попали в `main`, автоматически применяются к новым миграциям. Если нужна заморозка на конкретный коммит (например, для долгой миграции, которую делаешь поэтапно несколько дней) — `export BOOTSTRAP_TAG=<sha-or-tag>` перед запуском.
 
 ### Про текстовые ссылки на файлы bootstrap'а в этом ТЗ
 
-Во многих местах ниже встречаются формулировки вроде «см. шаблон в `~/ClaudeCode/web-dev-bootstrap/<path>`» — это **референс на файл в bootstrap-репо**, не команда. Если у тебя bootstrap клонирован локально — открывай его по этому пути. Если нет — открывай тот же файл на GitHub: `https://github.com/tem11134v2-cmd/web-dev-bootstrap/blob/v3.0/<path>`. Содержимое идентично.
+Во многих местах ниже встречаются формулировки вроде «см. шаблон в `~/ClaudeCode/web-dev-bootstrap/<path>`» — это **референс на файл в bootstrap-репо**, не команда. Если у тебя bootstrap клонирован локально — открывай его по этому пути. Если нет — открывай тот же файл на GitHub: `https://github.com/tem11134v2-cmd/web-dev-bootstrap/blob/main/<path>`. Содержимое идентично.
 
 ---
 
@@ -413,7 +413,7 @@ pnpm build
 - `telegram.ts` — Telegram Bot через node-telegram-bot-api (с guard'ом)
 - `crm.ts` — stub до реального подключения CRM (всегда бросает `SinkSkipped("CRM_NOT_CONFIGURED")`)
 
-Полные шаблоны кода — в `docs/forms-and-crm.md` § «Структура `lib/sinks/`» (читай оттуда, не дублируем 100 строк здесь). Если bootstrap клонирован локально — `cat ~/ClaudeCode/web-dev-bootstrap/docs/forms-and-crm.md`. Если нет — `https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.2/docs/forms-and-crm.md`.
+Полные шаблоны кода — в `docs/forms-and-crm.md` § «Структура `lib/sinks/`» (читай оттуда, не дублируем 100 строк здесь). Если bootstrap клонирован локально — `cat ~/ClaudeCode/web-dev-bootstrap/docs/forms-and-crm.md`. Если нет — `https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/main/docs/forms-and-crm.md`.
 
 Если в проекте есть **старый** `lib/crm.ts` (одиночная CRM-функция) — её содержимое переезжает в `lib/sinks/crm.ts` (заменяя stub) с добавлением `SinkSkipped` guard'а в начале. Сам файл `lib/crm.ts` после миграции удалить.
 
@@ -918,7 +918,7 @@ diff CLAUDE.md /tmp/bootstrap-claude-md-template.md
    Если bootstrap локально нет — стримить с GitHub raw:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/v3.0/scripts/bootstrap-vps.sh \
+   curl -fsSL https://raw.githubusercontent.com/tem11134v2-cmd/web-dev-bootstrap/main/scripts/bootstrap-vps.sh \
      | ssh root@{vps-ip} 'CADDY_ADMIN_EMAIL=admin@example.com bash -s'
    ```
 
