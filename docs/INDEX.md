@@ -13,7 +13,7 @@
 | `architecture.md` | Структура папок, App Router, Server/Client разделение, naming, max-150-строк | На init; при создании нового компонента; при рефакторинге |
 | `design-system.md` | Философия, цветовые токены, типографика, layout, header/footer, анимации | На дизайн-системе; при добавлении новых секций; при правках цветов |
 | `content-layout.md` | 44 типа секций конверсионного сайта + applicability + shadcn-маппинг | При сборке любой страницы; когда заказчик прислал текст и нужно понять тип секции |
-| `forms-and-crm.md` | Архитектура форм, RHF+Zod, Server Action `submitLead`, AmoCRM/Bitrix24 шаблоны, fallback в JSON, ConsultationDialog, useOptimistic | При создании любой формы; при подключении CRM |
+| `forms-and-crm.md` | Архитектура форм, RHF+Zod, Server Action `submitLead`, multi-sink доставка лидов (Sheets / Telegram / CRM через `Promise.allSettled`), AmoCRM/Bitrix24 шаблоны, JSON-fallback, ConsultationDialog, useOptimistic | При создании любой формы; при подключении любого канала лидов |
 | `legal-templates.md` | 152-ФЗ: cookie-баннер, согласие на ПДн, политика, оферта, чек-лист РКН | При создании форм на RU-сайте; перед публикацией; при подаче в РКН |
 | `seo.md` | robots/sitemap, мета, Schema.org, ЧПУ, перелинковка, коммерческие факторы, Яндекс-специфика, Турбо/ИКС | На каждой новой странице; при подключении Яндекс/Google |
 | `performance.md` | Core Web Vitals, изображения, шрифты, CSS, JS, кэш, серверная часть (Caddy `encode gzip zstd` + Cache-Control в шаблоне `server-add-site.md`), **Methodology § 13** (lessons), бюджет, чек-лист | На performance-аудите; при подозрении на регрессию; при выборе либ |
