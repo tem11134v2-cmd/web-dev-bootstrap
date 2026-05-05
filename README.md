@@ -1,4 +1,4 @@
-# web-dev-bootstrap v3.0
+# web-dev-bootstrap v3.2
 
 Промпт-пакет для Claude Code Desktop, который превращает его в дисциплинированного
 frontend-разработчика конверсионных сайтов на Next.js. Не зависимость, не
@@ -62,7 +62,7 @@ _BUILD/                    — служебное: HOW-TO-START.md (+.docx) — 
 ## Требования
 
 - Claude Code Desktop (macOS/Windows)
-- Node.js 22+ + pnpm (через `mise` на Mac, через `corepack` на VPS — обе ставятся в bootstrap'ах)
+- Node.js 22+ + pnpm на Mac (через `mise`). На VPS — только Node runtime + Caddy + PM2 (build идёт на GitHub-runner, pnpm на VPS не нужен)
 - `gh` CLI на Mac (для `gh repo create --template` и авторизации)
 - VPS с Ubuntu 22.04+ для деплоя (см. `docs/server-manual-setup.md`)
 
@@ -87,7 +87,7 @@ _BUILD/                    — служебное: HOW-TO-START.md (+.docx) — 
 
 ## Версия
 
-v3.0 (2026-04-29). Финал большого рефакторинга `_BUILD/v3/01-bootstrap-refactor.md` (7 фаз). Стек: **Caddy** (auto-HTTPS) вместо nginx+certbot, **push-based deploy** (build на GitHub runner → rsync → атомарный switch симлинком, миллисекунды, без пересборки на VPS), `output: 'standalone'` в Next 16, **Biome** вместо ESLint+Prettier, **pnpm** через mise/corepack, **schema-dts** для типобезопасных JSON-LD, **Cloudflare Turnstile** в формах, **Content Collections** для MDX, **Server Actions** + `useActionState` (вместо Route Handler `/api/lead`), опциональные **`use cache`** + **PPR** + **OKLCH** в Tailwind v4. Sequential **multi-Claude протокол** через `/handoff` + `/resume` + `/catchup` + stop-reminder hook. Полная история — `_BUILD/changelog.md`.
+v3.2 (2026-04-29). Текущая версия включает финал большого рефакторинга `_BUILD/v3/01-bootstrap-refactor.md` (7 фаз, v3.0) + унифицированный owner-гид (v3.1) + multi-sink доставку лидов (v3.2). Стек: **Caddy** (auto-HTTPS) вместо nginx+certbot, **push-based deploy** (build на GitHub runner → rsync → атомарный switch симлинком, миллисекунды, без пересборки на VPS), `output: 'standalone'` в Next 16, **Biome** вместо ESLint+Prettier, **pnpm** через mise/corepack, **schema-dts** для типобезопасных JSON-LD, **Cloudflare Turnstile** в формах, **Content Collections** для MDX, **Server Actions** + `useActionState` (вместо Route Handler `/api/lead`), **multi-sink** доставка лидов (Sheets / Telegram / CRM через `Promise.allSettled` с JSON-fallback), опциональные **`use cache`** + **PPR** + **OKLCH** в Tailwind v4. Sequential **multi-Claude протокол** через `/handoff` + `/resume` + `/catchup` + stop-reminder hook. Полная история — `_BUILD/changelog.md`.
 
 ## Лицензия
 
