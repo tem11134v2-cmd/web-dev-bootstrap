@@ -41,6 +41,8 @@ Deploy: git push → GitHub Actions → PM2 + Caddy (встроенный ACME) 
 
 ## Rules
 
+> Эти правила применяются в **site-режиме** (когда `# Project:` выше заполнен реальным именем сайта). В **bootstrap-режиме** (placeholder `[Name]`) — следуй META-инструкции в HTML-комментарии в начале файла, а не правилам ниже (например, ветка `feature/{тема}` вместо `dev`).
+
 - IMPORTANT: Always use plan mode (Shift+Tab×2) before coding
 - Read relevant `docs/` files listed in spec's "KB files to read first" — never load all docs
 - Read `.claude/memory/INDEX.md` at session start, then load only relevant memory files
