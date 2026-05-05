@@ -34,7 +34,7 @@ specs/                     — последовательность задач
   templates/                 → spec-template, page-spec-template
   examples/                  → живые образцы зрелых спек (референс формата)
 .claude/memory/            — шаблоны проектной памяти (INDEX + 6 файлов)
-_BUILD/                    — служебное: HOW-TO-START.md (+.docx) — единый owner-guide,
+_BUILD/                    — служебное: HOW-TO-START.md — единый owner-guide,
                              claude-md-template.md, changelog.md, v3/ (refactor-ТЗ + миграционный промт + workflow-шаблоны)
 ```
 

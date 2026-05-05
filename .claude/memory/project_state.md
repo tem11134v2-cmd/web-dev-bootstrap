@@ -35,7 +35,7 @@ type: project
 ## Next 1-3 steps
 
 1. **Запустить ТЗ-2** в папке конкретного старого проекта: открой Claude-чат в `~/projects/{site}`, скажи: «Прочитай файл `~/ClaudeCode/web-dev-bootstrap/_BUILD/v3/02-migrate-existing-project.md` и выполни его на этом проекте. Сначала покажи план миграции, жди подтверждения.»
-2. **Outstanding после v3.0** (не блокируют дальнейшую работу, но висят): регенерация `_BUILD/HOW-TO-START.docx` через pandoc + первый реальный push-based деплой на live-VPS (Phase 5 не обкатывалась).
+2. **Outstanding после v3.0** (не блокируют дальнейшую работу): первый реальный push-based деплой на live-VPS (Phase 5 не обкатывалась).
 3. **Точечные правки самого bootstrap'а** делаются как обычно: feature-ветка → squash PR → semver-тег `v3.0.x` / `v3.1` / и т.д.
 
 ## Session log
@@ -58,7 +58,6 @@ type: project
 
 **Open at handoff:**
 - Push ветки `feat/v3.0-handoff-protocol`, создать PR, squash-merge в main, тег `v3.0`. Это закроет Phase 6 на origin.
-- (post-v3.0 outstanding) Регенерация `_BUILD/HOW-TO-START.docx` через pandoc.
 - (post-v3.0 outstanding) Первый реальный push-based деплой на live-VPS.
 
 **Uncommitted changes:** нет
