@@ -19,7 +19,7 @@
 | `performance.md` | Core Web Vitals, изображения, шрифты, CSS, JS, кэш, серверная часть (Caddy `encode gzip zstd` + Cache-Control в шаблоне `server-add-site.md`), **Methodology § 13** (lessons), бюджет, чек-лист | На performance-аудите; при подозрении на регрессию; при выборе либ |
 | `conversion-patterns.md` | 10 принципов конверсии: CTA, social proof, lead magnet, quiz, exit-intent, sticky, формы | На главной/посадочных; при доработке воронки |
 | `deploy.md` | Единая схема (Mac → GitHub → VPS), ветки, GitHub Actions, ежедневный цикл, откат, Cloudflare | При init проекта; при ежедневном деплое; при правках CI/CD |
-| `server-manual-setup.md` | Разовая настройка свежего VPS через `scripts/bootstrap-vps.sh`: пользователь, SSH, ufw, swap, Node/Caddy/PM2, deploy-ключ | Один раз на каждый новый VPS |
+| `server-manual-setup.md` | Разовая настройка свежего VPS через `scripts/bootstrap-vps.sh`: пользователь, SSH, ufw, swap, Node runtime + Caddy + PM2 (build на runner, pnpm/git на VPS не ставятся) | Один раз на каждый новый VPS |
 | `server-add-site.md` | Подключение нового сайта на готовый VPS: порты, клон, Caddy-конфиг, SSL (автоматический), GitHub Secrets, первый деплой | Один раз на каждый новый сайт |
 | `server-multisite.md` | Как уживаются несколько сайтов на одном VPS (реестр портов, PM2, Caddyfile.d, когда выносить на отдельный VPS) | При подключении 2-го и далее сайта; при масштабировании |
 | `domain-connect.md` | A-записи у регистратора или Cloudflare, проверка `dig`, подготовка к SSL | Один раз на каждый домен |
