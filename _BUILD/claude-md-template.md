@@ -114,7 +114,7 @@ Task specs in `specs/` folder. Execute one per session.
 
 ```
 pnpm dev         — dev server (port 3000, локально на Mac)
-pnpm build       — production build (собирается на VPS после git pull)
+pnpm build       — production build (собирается на GitHub-runner, rsync-ится на VPS как standalone-артефакт)
 pnpm start       — prod server (порт передаётся через PORT=... при pm2 start)
 pnpm lint        — Biome linter (заменил ESLint)
 pnpm format      — Biome formatter (write changes)
