@@ -526,9 +526,11 @@ GOOGLE_SHEETS_TAB_NAME=Leads          # опционально, default "Leads"
 TG_BOT_TOKEN=123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TG_CHAT_ID=-1001234567890
 
-# Sink: CRM (placeholder — раскомментируй при подключении)
-# AMO_CRM_URL=https://yourdomain.amocrm.ru
-# AMO_CRM_TOKEN=eyJ...
+# Sink: CRM — AmoCRM (раскомментируй при подключении)
+# AMO_CRM_URL=https://yourdomain.amocrm.ru   # без / в конце; Kommo — .kommo.com
+# AMO_CRM_TOKEN=eyJ...                        # долгосрочный токен интеграции
+# AMO_CRM_PIPELINE_ID=                        # опц. — ID воронки (иначе дефолтная)
+# AMO_CRM_STATUS_ID=                          # опц. — ID этапа (иначе первый)
 ```
 
 В `.env.example` — те же ключи без значений (этот файл коммитится в git как контракт):
@@ -543,6 +545,12 @@ GOOGLE_SHEETS_SPREADSHEET_ID=
 
 TG_BOT_TOKEN=
 TG_CHAT_ID=
+
+# CRM — AmoCRM (опционально; раскомментируй при подключении)
+# AMO_CRM_URL=
+# AMO_CRM_TOKEN=
+# AMO_CRM_PIPELINE_ID=
+# AMO_CRM_STATUS_ID=
 ```
 
 `NEXT_PUBLIC_TURNSTILE_SITE_KEY` — единственное публичное (по дизайну Cloudflare). Все остальные — серверные, **никогда** не `NEXT_PUBLIC_`.
@@ -581,16 +589,37 @@ TG_CHAT_ID=
 import { SinkSkipped, type LeadData } from "./index";
 
 export async function sendToCRM(data: LeadData): Promise<void> {
-  const url = process.env.AMO_CRM_URL;     // https://yourdomain.amocrm.ru
-  const token = process.env.AMO_CRM_TOKEN; // long-lived integration token
+  const url = process.env.AMO_CRM_URL;     // https://yourdomain.amocrm.ru (без / в конце)
+  const token = process.env.AMO_CRM_TOKEN; // долгосрочный токен интеграции
 
   if (!url || !token) {
     throw new SinkSkipped("AMO_CRM_NOT_CONFIGURED");
   }
 
-  // Имя лида включает обрезанный preview сообщения — менеджер в Amo сразу
-  // видит контекст без открытия лида. Полное сообщение пишется в note ниже.
+  // Опциональная маршрутизация. Не заданы — Amo кладёт сделку в первый этап
+  // главной воронки. Заданы — в конкретную воронку/этап (где взять ID — см.
+  // «Подготовка amoCRM (один раз)» ниже).
+  const pipelineId = process.env.AMO_CRM_PIPELINE_ID;
+  const statusId = process.env.AMO_CRM_STATUS_ID;
+
+  // Имя сделки включает обрезанный preview сообщения — менеджер в Amo сразу
+  // видит контекст без открытия сделки. Полное сообщение пишется в note ниже.
   const messagePreview = data.message ? ` — ${data.message.slice(0, 60)}${data.message.length > 60 ? "..." : ""}` : "";
+
+  const lead: Record<string, unknown> = {
+    name: `Заявка с сайта: ${data.source}${messagePreview}`,
+    _embedded: {
+      contacts: [{
+        name: data.name,
+        custom_fields_values: [
+          { field_code: "PHONE", values: [{ value: data.phone, enum_code: "WORK" }] },
+          ...(data.email ? [{ field_code: "EMAIL", values: [{ value: data.email, enum_code: "WORK" }] }] : []),
+        ],
+      }],
+    },
+  };
+  if (pipelineId) lead.pipeline_id = Number(pipelineId);
+  if (statusId) lead.status_id = Number(statusId);
 
   const res = await fetch(`${url}/api/v4/leads/complex`, {
     method: "POST",
@@ -598,29 +627,21 @@ export async function sendToCRM(data: LeadData): Promise<void> {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify([{
-      name: `Заявка с сайта: ${data.source}${messagePreview}`,
-      _embedded: {
-        contacts: [{
-          name: data.name,
-          custom_fields_values: [
-            { field_code: "PHONE", values: [{ value: data.phone, enum_code: "WORK" }] },
-            ...(data.email ? [{ field_code: "EMAIL", values: [{ value: data.email, enum_code: "WORK" }] }] : []),
-          ],
-        }],
-      },
-    }]),
+    body: JSON.stringify([lead]),
   });
 
   if (!res.ok) {
     throw new Error(`AmoCRM ${res.status}: ${await res.text()}`);
   }
 
-  // Полное сообщение — отдельной нотой к лиду (если есть). Не критично если
-  // упадёт — лид уже создан.
+  // Полное сообщение — отдельной нотой к сделке (если есть). Не критично если
+  // упадёт — сделка уже создана.
+  // ВАЖНО: /leads/complex возвращает ПЛОСКИЙ массив [{ id, contact_id,
+  // request_id, merged }], а не { _embedded: { leads: [...] } }. ID сделки —
+  // это created[0].id.
   if (data.message) {
-    const created = (await res.json()) as { _embedded?: { leads?: { id: number }[] } };
-    const leadId = created._embedded?.leads?.[0]?.id;
+    const created = (await res.json()) as Array<{ id: number }>;
+    const leadId = created[0]?.id;
     if (leadId) {
       await fetch(`${url}/api/v4/leads/${leadId}/notes`, {
         method: "POST",
@@ -629,11 +650,26 @@ export async function sendToCRM(data: LeadData): Promise<void> {
           "Content-Type": "application/json",
         },
         body: JSON.stringify([{ note_type: "common", params: { text: data.message } }]),
-      }).catch(() => {/* note не критична — игнорируем */});
+      }).catch(() => {/* нота не критична — игнорируем */});
     }
   }
 }
 ```
+
+**Подготовка amoCRM (один раз):**
+
+amoCRM не требует OAuth-танца с refresh-токенами — для server-to-server берём **долгосрочный токен** (живёт от 1 дня до 5 лет, срок задаёшь сам). Это ровно то, что нужно нашему stateless-деплою (PM2 без БД): токен лежит в `.env`, ротации не требует.
+
+1. amoCRM → открыть **amoMarket** (в новых аккаунтах; в старых — **Настройки → Интеграции**) → **«+ Создать интеграцию»** → **«Внешняя интеграция»**. Указать ссылку на сайт (нужна при создании), права доступа — «Всё» (или минимум: сделки + контакты на запись).
+2. Открыть созданную интеграцию → вкладка **«Ключи и доступы»** → раздел **«Долгосрочный токен»** → **«Сгенерировать токен»** → выбрать срок (ставь максимум — 5 лет) → **«Подтвердить»** → скопировать. Это `AMO_CRM_TOKEN`.
+3. `AMO_CRM_URL` — адрес аккаунта целиком: `https://yourdomain.amocrm.ru` (международный Kommo — `https://yourdomain.kommo.com`). **Без** слэша в конце.
+4. (Опционально) маршрутизация в воронку/этап:
+   - `AMO_CRM_PIPELINE_ID` — ID воронки, `AMO_CRM_STATUS_ID` — ID этапа.
+   - Где взять: amoCRM → **Сделки → Настроить** (шестерёнка воронки) — ID воронки и этапов видны в URL/настройках. Программно — `GET {AMO_CRM_URL}/api/v4/leads/pipelines` с тем же Bearer-токеном.
+   - Не задал — лид падает в первый этап главной воронки (для большинства лендингов достаточно).
+5. Тест локально: `pnpm dev`, отправь форму → в amoCRM появляется новая **сделка** с контактом (имя/телефон/email) и примечанием с текстом сообщения.
+
+> **Безопасность.** Долгосрочный токен = доступ к аккаунту по выбранным правам. Хранить только в `.env` / GitHub-секрете `PROD_ENV_FILE`, **никогда** в git и не в `NEXT_PUBLIC_*`. Утёк — отозвать в той же вкладке «Ключи и доступы» и сгенерировать новый.
 
 ### Bitrix24 (вебхук)
 
