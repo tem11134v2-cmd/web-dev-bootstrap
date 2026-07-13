@@ -78,6 +78,7 @@ Stop-хук `.claude/hooks/stop-reminder.sh` подсказывает про `/h
 
 - **After spec complete** → update `project_state.md` (mark done, set next spec)
 - **Client gives feedback / correction** → save to `feedback.md` with **Why:** + **How to apply:**
+- **Business fact learned** (цена, метрика воронки, возражение, сработавший оффер) → save to `business.md`; заголовок записи — утверждение, с источником и датой
 - **Non-obvious decision made** → save to `decisions.md` with **Why:** + alternative considered
 - **Incident / fix** → save to `lessons.md` (symptom → cause → fix → prevention)
 - **External service integrated** (CRM, analytics, etc.) → save IDs/URLs to `references.md` (NEVER secrets)
@@ -97,6 +98,7 @@ docs/design-system.md      — colors, typography, spacing, animation rules
 docs/content-layout.md     — 44 section types and their structure
 docs/forms-and-crm.md      — form handling, CRM integration, consultation dialog
 docs/deploy.md             — Mac → GitHub → VPS, branches, Actions, daily cycle, rollback
+docs/deploy-checklist.md   — pre-launch gate: секреты, формы, заголовки, 152-ФЗ, SEO, перфоманс
 docs/seo.md                — meta, Schema.org, redirects, Yandex specifics
 docs/performance.md        — Core Web Vitals, methodology (LCP breakdown), budget
 docs/conversion-patterns.md — CTA placement, social proof, lead magnets, quiz
@@ -142,3 +144,4 @@ pnpm typecheck   — tsc --noEmit
 
 After each change: check on localhost, no console errors, responsive on 375/768/1280px.
 Before merging to `main`: `pnpm build` must succeed locally, Lighthouse mobile + desktop ≥ 90.
+Before FIRST production release: run `/security-audit` and walk `docs/deploy-checklist.md`.

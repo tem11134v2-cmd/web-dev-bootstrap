@@ -1,4 +1,4 @@
-# web-dev-bootstrap v3.4
+# web-dev-bootstrap v3.5
 
 Промпт-пакет для Claude Code Desktop, который превращает его в дисциплинированного
 frontend-разработчика конверсионных сайтов на Next.js. Не зависимость, не

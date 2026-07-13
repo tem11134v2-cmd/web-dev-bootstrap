@@ -19,11 +19,12 @@
 | `performance.md` | Core Web Vitals, изображения, шрифты, CSS, JS, кэш, серверная часть (Caddy `encode gzip zstd` + Cache-Control в шаблоне `server-add-site.md`), **Methodology § 13** (lessons), бюджет, чек-лист | На performance-аудите; при подозрении на регрессию; при выборе либ |
 | `conversion-patterns.md` | 10 принципов конверсии: CTA, social proof, lead magnet, quiz, exit-intent, sticky, формы | На главной/посадочных; при доработке воронки |
 | `deploy.md` | Единая схема (Mac → GitHub → VPS), ветки, GitHub Actions, ежедневный цикл, откат, Cloudflare | При init проекта; при ежедневном деплое; при правках CI/CD |
+| `deploy-checklist.md` | Pre-launch gate: секреты, формы/лиды, заголовки, 152-ФЗ, SEO, перфоманс, первые 24 часа — только индекс со ссылками на источники | Перед первым прод-релизом каждого сайта; перед крупными релизами |
 | `server-manual-setup.md` | Разовая настройка свежего VPS через `scripts/bootstrap-vps.sh`: пользователь, SSH, ufw, swap, Node runtime + Caddy + PM2 (build на runner, pnpm/git на VPS не ставятся) | Один раз на каждый новый VPS |
 | `server-add-site.md` | Подключение нового сайта на готовый VPS: порты, клон, Caddy-конфиг, SSL (автоматический), GitHub Secrets, первый деплой | Один раз на каждый новый сайт |
 | `server-multisite.md` | Как уживаются несколько сайтов на одном VPS (реестр портов, PM2, Caddyfile.d, когда выносить на отдельный VPS) | При подключении 2-го и далее сайта; при масштабировании |
 | `domain-connect.md` | A-записи у регистратора или Cloudflare, проверка `dig`, подготовка к SSL | Один раз на каждый домен |
-| `automation.md` | Хуки `.claude/hooks/*` (session-start, before-push, guard-rm, format, stop-reminder) + slash-команды `.claude/commands/*` (handoff, resume, catchup) + скрипты `scripts/sync-env.sh`, `rollback.sh`. Что делают, как отключить, как добавить новый | Когда непонятно что хук пишет в чате; когда нужно sync/rollback; при добавлении нового хука; при настройке multi-Claude flow |
+| `automation.md` | Хуки `.claude/hooks/*` (session-start, before-push, guard-rm, format, stop-reminder) + slash-команды `.claude/commands/*` (handoff, resume, catchup, security-audit) + скрипты `scripts/sync-env.sh`, `rollback.sh`. Что делают, как отключить, как добавить новый | Когда непонятно что хук пишет в чате; когда нужно sync/rollback; при добавлении нового хука; при настройке multi-Claude flow |
 | `troubleshooting.md` | Частые косяки: gh auth mismatch, DDoS-Guard 301, SSH permission denied в deploy job, симлинк `current` не переключился, rsync ошибки, PM2 не находит `server.js`, Caddy не стартует, SSL не выписывается, branch protection 403, swap не пересоздаётся, prod 404 | Когда что-то сломалось — сначала сюда, потом `lessons.md` |
 
 ## Проектные файлы (не KB)
