@@ -1,5 +1,7 @@
 # Spec 07: Блог на MDX через Content Collections (опционально)
 
+> Оркестрация: builder-sonnet; параллель: с 05/06/08; verifier: нет
+
 ## KB files to read first
 
 - docs/architecture.md (раздел «MDX через Content Collections»)
@@ -20,17 +22,7 @@
 
 ## Почему Content Collections, а не next-mdx-remote
 
-| | next-mdx-remote | Content Collections |
-|---|---|---|
-| Парсинг frontmatter | вручную через `gray-matter` | через Zod-схему в config |
-| Типобезопасность | нет (data: any из gray-matter) | да (типы автогенерируются) |
-| Когда парсится MDX | на каждом запросе/билде в runtime | один раз на билде, кэшируется |
-| Опечатка в frontmatter | падает 500 на проде | TypeScript-ошибка на билде |
-| Сборка bundle | один из MDX-кусков попадает в JS-бандл | компилируется в `.content-collections/` рядом с `.next/` |
-
-Вторичные плюсы: автогенерация TypeScript-типов из схемы, дев-вотчер на `content/blog/*.mdx` (изменения подхватываются без рестарта), общая утилита `allPosts` вместо ручного `lib/blog.ts`.
-
-> **Про `use cache` поверх Content Collections.** Content Collections компилирует MDX **на билде**, `allPosts` — это уже статичный массив в `.content-collections/generated`. Дополнительный `'use cache'` поверх него обычно избыточен. Имеет смысл, только если в `app/blog/page.tsx` есть тяжёлая фильтрация / пагинация / поиск по тегам — тогда обернуть функцию-фильтр через `'use cache'`. Для дефолтного списка статей не нужно. См. `docs/performance.md` § 7.
+Таблица выбора MDX-стека — `docs/architecture.md` (раздел «MDX через Content Collections»). Коротко: Zod-схема frontmatter вместо ручного `gray-matter`, автогенерируемые типы, компиляция один раз на билде (опечатка в frontmatter = ошибка билда, не 500 на проде), дев-вотчер на `content/blog/*.mdx`.
 
 ## Tasks
 
@@ -38,10 +30,10 @@
 
 1. Поставить пакеты:
    ```bash
-   pnpm add content-collections @content-collections/core @content-collections/mdx @content-collections/next
+   pnpm add -D @content-collections/core @content-collections/next @content-collections/mdx
    pnpm add -D @tailwindcss/typography
    ```
-   `@tailwindcss/typography` нужен для `prose`-классов в теле статьи (см. шаг 9).
+   **Пакета `content-collections` в npm НЕ существует** — не пытайся его ставить. Импорт `from 'content-collections'` в коде работает через tsconfig-алиас (шаг 3). `@tailwindcss/typography` нужен для `prose`-классов в теле статьи (см. шаг 9).
 
 2. Обернуть `next.config.ts`:
    ```typescript
@@ -155,8 +147,10 @@
      return allPosts.filter(p => !p.draft).map(p => ({ slug: p.slug }))
    }
 
-   export function generateMetadata({ params }: { params: { slug: string } }) {
-     const post = allPosts.find(p => p.slug === params.slug)
+   // Next 16: params — это Promise, обязательно await
+   export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+     const { slug } = await params
+     const post = allPosts.find(p => p.slug === slug)
      if (!post) return {}
      return {
        title: post.title,
@@ -165,8 +159,9 @@
      }
    }
 
-   export default function PostPage({ params }: { params: { slug: string } }) {
-     const post = allPosts.find(p => p.slug === params.slug)
+   export default async function PostPage({ params }: { params: Promise<{ slug: string }> }) {
+     const { slug } = await params
+     const post = allPosts.find(p => p.slug === slug)
      if (!post || post.draft) notFound()
      return (
        <article className="prose prose-lg mx-auto max-w-3xl">

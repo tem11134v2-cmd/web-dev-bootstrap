@@ -1,5 +1,7 @@
 # Spec 06: Раскатка подстраниц по карте
 
+> Оркестрация: builder-sonnet fan-out; параллель: внутри себя по страницам + с 07; verifier: SEO-чеклист по 2-3 случайным страницам + `pnpm build`
+
 ## KB files to read first
 
 - docs/pages.md (полный список страниц)
@@ -17,6 +19,15 @@
 ## Background
 
 Это самая объёмная и рутинная фаза. Цель — максимальная автоматизация: одна страница ≈ 5-10 минут (создать data-файл + page.tsx + добавить в sitemap). При большом объёме (>10 страниц) — разбить на сессии, не пытаться сделать всё за раз.
+
+## Оркестраторный режим: fan-out (см. docs/orchestration.md)
+
+Эта спека — образцовый fan-out: страницы независимы, раздаются субагентам по одной.
+
+- **Бриф субагенту (builder-sonnet), по одному на страницу:** заполненный `specs/templates/page-spec-template.md` + `components/service-page/types.ts` + `components/service-page/ServicePageTemplate.tsx` + свой кусок контента из `docs/content.md`. Субагент создаёт ТОЛЬКО `app/[slug]/page.tsx` и `app/[slug]/page-data.ts` — больше ничего не трогает.
+- **Конфликтные файлы правит ТОЛЬКО финальный integrator** (после приёма всех страниц, одним проходом): `app/sitemap.ts`, Header/Footer/навигация, `docs/pages.md` (статусы), `next.config.ts` (redirects). Субагент, которому «нужно» в эти файлы, возвращает запрос в отчёте, а не правит сам.
+- **Verifier:** SEO-чеклист docs/seo.md по 2-3 случайным страницам + `pnpm build` после интеграции.
+- **В интерактивном режиме** (человек ведёт сессию сам) — по-старому: страницы последовательно по Tasks ниже.
 
 ## Tasks
 
@@ -52,8 +63,8 @@
      return <ServicePageTemplate data={data} />
    }
    ```
-6. Добавить страницу в `app/sitemap.ts`
-7. Если в `docs/pages.md` есть редирект для этой страницы — добавить в `next.config.ts → redirects()`
+6. Добавить страницу в `app/sitemap.ts` *(в fan-out — только integrator, одним проходом)*
+7. Если в `docs/pages.md` есть редирект для этой страницы — добавить в `next.config.ts → redirects()` *(в fan-out — только integrator)*
 8. Коммит `feat: add /[slug]/ page`
 
 ### 3. Кастомные страницы
@@ -67,11 +78,11 @@
     - Хлебные крошки (компонент `components/layout/Breadcrumbs.tsx` — создать если нет, server component)
     - Блок Related в конце страницы (3-6 связанных услуг)
     - Внутренние ссылки в основном контенте на смежные услуги (не «подробнее», а «оформление визы O-1»)
-12. Обновить навигацию Header/Footer ссылками на новые страницы
+12. Обновить навигацию Header/Footer ссылками на новые страницы *(в fan-out — только integrator)*
 
 ### 5. Обновить статус в pages.md
 
-13. Поменять статус страниц на `done` в `docs/pages.md`
+13. Поменять статус страниц на `done` в `docs/pages.md` *(в fan-out — только integrator)*
 
 ### 6. Проверка
 
@@ -84,7 +95,7 @@
 
 - **Always:** уникальные title/description/H1 для каждой страницы (нет дублей), коммит после каждой страницы
 - **Ask first:** если страница требует структуры не из docs/content-layout.md (новый тип секции), если нет текста для страницы в docs/content.md
-- **Never:** копировать title/description между страницами, оставлять страницу без canonical, забывать sitemap
+- **Never:** копировать title/description между страницами, оставлять страницу без canonical, забывать sitemap; в fan-out субагенту — трогать конфликтные файлы (sitemap, Header/Footer, pages.md, next.config)
 
 ## Done when
 

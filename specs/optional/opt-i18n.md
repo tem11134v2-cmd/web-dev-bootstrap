@@ -1,5 +1,7 @@
 # Spec [opt]: Многоязычность (next-intl)
 
+> Оркестрация: builder-opus СОЛО (реструктуризация в `app/[locale]/` трогает всё дерево); параллель: запрещена; verifier: проверка hreflang + переключения локалей
+
 ## Когда применять
 
 Сайт должен быть на 2+ языках. Типичный случай: русский (основной) + английский для иностранной аудитории.
@@ -9,7 +11,7 @@
 ## KB files to read first
 
 - docs/architecture.md
-- docs/seo.md (раздел про hreflang)
+- docs/seo.md, раздел hreflang
 - docs/pages.md (на каких страницах нужна локализация)
 - `app/layout.tsx`, `app/page.tsx`
 

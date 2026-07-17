@@ -1,10 +1,14 @@
 # Page Spec: [Название страницы]
 
+> Готовый бриф для builder-sonnet: спека самодостаточна (метаданные, секции, контент, Done when — внутри), субагент выполняет её без доступа к остальной переписке.
+
 <!--
 Шаблон спеки для добавления новой страницы. Используется в спеках
-05-subpages-template, 06-subpages-rollout, 13-extend-site.
+05-subpages-template, 06-subpages-rollout (fan-out: один субагент = одна
+заполненная page-spec), 13-extend-site.
 
-Скопируй файл, заполни, удали комментарии.
+Скопируй файл, заполни, удали комментарии. В fan-out субагент создаёт только
+app/[slug]/page.tsx и page-data.ts; sitemap/навигацию правит integrator.
 -->
 
 ## KB files to read first
@@ -108,8 +112,8 @@
 1. Создать `app/[путь]/page.tsx` (server component) с metadata
 2. Создать `app/[путь]/page-data.ts` (если шаблонизация) с данными секций
 3. Подключить шаблон `ServicePageTemplate` или собрать секции вручную
-4. Добавить страницу в `app/sitemap.ts`
-5. Добавить редиректы в `next.config.ts` (если есть старый URL)
+4. Добавить страницу в `app/sitemap.ts` *(в fan-out — только integrator)*
+5. Добавить редиректы в `next.config.ts` (если есть старый URL) *(в fan-out — только integrator)*
 6. Проверить локально: SEO теги, Schema.org валидатор, мобилка, формы
 7. Деплой по схеме (см. docs/deploy.md)
 

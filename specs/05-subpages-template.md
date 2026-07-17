@@ -1,8 +1,10 @@
 # Spec 05: Шаблон подстраницы услуги
 
+> Оркестрация: builder-opus; параллель: с 07; verifier: не нужен (гейт = SSR view-source чек + валидация JSON-LD силами исполнителя)
+
 ## KB files to read first
 
-- docs/architecture.md (раздел «Шаблонизация» и «Server/Client разделение»)
+- docs/architecture.md (разделы «Правила кода» → «Шаблонизация» и «Server / Client разделение»)
 - docs/content-layout.md (секции для страниц услуг)
 - docs/seo.md (Schema.org Service, метаданные)
 - docs/pages.md (список подстраниц, чтобы понять разнообразие)
@@ -101,6 +103,8 @@ Server Component по умолчанию (нулевой клиентский JS
    }
    ```
 9. Создать `app/[slug]/page-data.ts` — заполнить из `docs/content.md`
+
+   `[slug]` в путях — плейсхолдер конкретного имени папки (например `app/vizy-o1/`), НЕ динамический сегмент. Если понадобится настоящий динамический роут — в Next 16 `params` это Promise: `const { slug } = await params`, компонент и `generateMetadata` становятся `async` (пример — спека 07).
 10. Открыть на localhost — проверить что страница рендерится, контент верный, формы кликабельны
 
 ### 6. Проверка качества
@@ -112,23 +116,13 @@ Server Component по умолчанию (нулевой клиентский JS
 
 ## Boundaries
 
-- **Always:** все статичные секции — server components, выносить «вирусные» хуки в отдельные client-компоненты (см. lessons «viral client» в performance.md)
+- **Always:** все статичные секции — server components, выносить «вирусные» хуки в отдельные client-компоненты (антипаттерн «вирусный client» — docs/architecture.md § «Server / Client разделение», docs/performance.md § Methodology)
 - **Ask first:** если страница требует уникальных секций, не подходящих под шаблон — обсудить, делаем как кастомную или расширяем шаблон
 - **Never:** добавлять `"use client"` в page.tsx (только если страница реально интерактивная), хардкодить JSON-LD в page.tsx (только через генератор)
 
-## Опционально: `use cache` для тяжёлых server-компонентов
+## Опционально: кэш тяжёлых server-секций
 
-Если секция шаблона делает дорогой парсинг или server-fetch на каждый рендер (например, динамическая таблица сравнения с расчётами по 100+ позициям) — можно обернуть её в `'use cache'`:
-
-```typescript
-async function ComparisonSection({ slug }: { slug: string }) {
-  'use cache'
-  const rows = await loadComparison(slug)
-  return <Comparison rows={rows} />
-}
-```
-
-Не нужно для статичных секций (Hero, Steps, FAQ) — они и так server-rendered один раз на билде. Подробнее когда применять — `docs/performance.md` § 7 «Next.js: директива `use cache`».
+Если секция шаблона делает дорогой парсинг/расчёт на каждый рендер (например, таблица сравнения с расчётами по 100+ позициям) — есть опциональный кэш-режим (`cacheComponents` + директива `'use cache'`). Включается осознанно, после стабилизации, не по умолчанию — когда и как см. `docs/architecture.md`. Для статичных секций (Hero, Steps, FAQ) не нужен — они и так рендерятся один раз на билде.
 
 ## Done when
 

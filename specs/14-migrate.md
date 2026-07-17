@@ -1,5 +1,7 @@
 # Spec 14: Migrate site (между серверами или в рамках handoff)
 
+> Оркестрация: интерактив (SSH-ops, ведёт оркестратор с подтверждениями человека), субагенту не отдаётся; SSH — по канону CLAUDE.md (предупреждать пользователя, изменения только батчированными идемпотентными скриптами); параллель: нет; verifier: не нужен (гейт = curl/dig-проверки + soak 7 дней)
+
 ## KB files to read first
 
 - docs/deploy.md (push-based flow, структура `releases/<sha>/`)
@@ -36,29 +38,35 @@
    ```bash
    ssh-copy-id -i ~/.ssh/{site}-deploy.pub -p {ssh-port} deploy@new-vps
    ```
-5. Скопировать Caddy-конфиг с подменённым upstream-портом (если порт меняется):
+5. Положить Caddy-конфиг с подменённым upstream-портом (если порт меняется) — батчированно, без интерактивных правок. Файл `deploy/{site}.caddy.example` лежит в репо на Mac (деплой-артефакт папку `deploy/` на VPS не привозит):
    ```bash
-   sudo cp /home/deploy/prod/{site}/deploy/{site}.caddy.example \
-           /etc/caddy/Caddyfile.d/{site}.caddy
-   sudo nano /etc/caddy/Caddyfile.d/{site}.caddy   # сверь порт
+   # с Mac, из папки проекта:
+   scp -P {ssh-port} deploy/{site}.caddy.example deploy@new-vps:/tmp/
+   # на новом VPS:
+   sudo mv /tmp/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
+   # если порт на новом VPS другой — подменить неинтерактивно:
+   sudo sed -i 's/127.0.0.1:{old-port}/127.0.0.1:{new-port}/' /etc/caddy/Caddyfile.d/{site}.caddy
+   grep reverse_proxy /etc/caddy/Caddyfile.d/{site}.caddy   # сверить порт глазами
    sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
    ```
    Caddy ничего не выпустит, пока DNS не указывает на новый IP — это нормально, обработка ACME отложится до § 5.
 
 ### 3. Перенести runtime-данные
 
-6. Перенести то, что **не в git и не в standalone-сборке** — фактически только локальные файлы из активного релиза, например `data/leads.json` или uploads:
+6. Перенести то, что **не в git и не в standalone-сборке**. Главное — `~/prod/{site}/shared/data` (fallback-лиды `leads.jsonl`, `LEADS_DIR`): она живёт вне `releases/`, деплой её не трогает, переносится один-в-один:
    ```bash
    # с Mac:
-   rsync -avz \
-     old-vps:/home/deploy/prod/{site}/current/data/ \
-     new-vps:/home/deploy/prod/{site}/releases/_seed-data/
-   # если есть uploads (вне git):
-   rsync -avz \
-     old-vps:/home/deploy/prod/{site}/current/public/uploads/ \
-     new-vps:/home/deploy/prod/{site}/releases/_seed-uploads/
+   ssh deploy@new-vps 'mkdir -p ~/prod/{site}/shared/data'
+   # rsync два remote в одной команде не умеет («The source and destination cannot
+   # both be remote») — гоняем со старого VPS, зайдя с agent forwarding (ssh -A):
+   ssh -A deploy@old-vps \
+     'rsync -az ~/prod/{site}/shared/data/ deploy@new-vps:~/prod/{site}/shared/data/'
+   # если есть uploads (вне git, внутри релиза):
+   ssh -A deploy@old-vps \
+     'rsync -az ~/prod/{site}/current/public/uploads/ deploy@new-vps:~/prod/{site}/releases/_seed-uploads/'
    ```
-   Папки `_seed-*` — временные. Первый деплой через GitHub Actions создаст `releases/<sha>/`, после чего перенеси `_seed-*` руками в активный релиз: `cp -r _seed-data/* current/data/` и т.п. Источник истины для лидов — CRM, `data/leads.json` это fallback.
+   Если agent forwarding недоступен (ключ не в агенте / провайдер режет) — два прыжка через Mac: `rsync -az old-vps:...` во временную папку на Mac, затем `rsync -az` из неё на new-vps.
+   `_seed-uploads/` — временная: после первого деплоя перенеси её содержимое в активный релиз (`cp -r ... current/public/uploads/`). На старых проектах (до v4) fallback-лиды могли лежать в `current/data/leads.json` — проверь и захвати их тоже. Источник истины для лидов — подключённые каналы (почта/CRM), `leads.jsonl` это fallback.
 
 ### 4. Обновить GitHub Environment Secrets
 
@@ -67,12 +75,12 @@
    - `SSH_PORT` → кастомный порт нового VPS (если отличается).
    - `SSH_PRIVATE_KEY` — содержимое того же `~/.ssh/{site}-deploy` приватного ключа разработчика (он же был в старом environment'е). Если делаешь ротацию ключа в рамках миграции — сгенерируй новый, положи публичную часть в `authorized_keys` нового VPS (§ 2.4), приватную загрузи через `gh secret set --env production SSH_PRIVATE_KEY`.
    - `PROD_ENV_FILE` — без изменений, **если только** провайдер не блокирует исходящий трафик к каким-то IP / API-ключи не надо ротировать.
-8. Триггернуть workflow пушем пустого коммита (`git commit --allow-empty -m "chore: redeploy to new VPS"`) или `Actions → Re-run`. Должен собраться билд на runner-е и rsync пройти на новый VPS, симлинк переключиться, PM2 стартануть.
+8. Триггернуть workflow пушем пустого коммита (`git commit --allow-empty -m "chore: redeploy to new VPS"`) или `Actions → Re-run`. Должен собраться билд на runner-е, артефакт уехать tar.gz-ом (scp) на новый VPS, симлинк переключиться, PM2 стартануть.
 
 ### 5. DNS switchover
 
-9. Обновить A-запись `{domain}` → новый IP у регистратора (или в Cloudflare, если используется).
-10. Подождать распространения: `dig +short {domain}` с разных машин должен возвращать новый IP. Обычно 5–30 минут.
+9. Обновить A-запись `{domain}` → новый IP у регистратора (или в Cloudflare, если используется). GUI регистратора — **делает человек** (канон CLAUDE.md); Claude даёт точное значение записи.
+10. Подождать распространения: `dig +short {domain}` — проверяет Claude; новый IP должен возвращаться стабильно. Обычно 5–30 минут.
 11. SSL Caddy на новом VPS выпустит автоматически при первом HTTPS-запросе (HTTP-01 challenge). Никаких `certbot` вызовов делать не нужно. Проверь:
     ```bash
     curl -I https://{domain}
@@ -83,7 +91,7 @@
 ### 6. Soak и decommission
 
 13. **7 дней** держать старый VPS включённым, Caddy + PM2 работают. На случай, если надо откатить DNS обратно.
-14. После 7 дней (или раньше, если уверен):
+14. После 7 дней (или раньше, если уверен). Перед `rm` — убедиться, что `~/prod/{site}/shared/data` (fallback-лиды) перенесена в § 3 или выгружена:
     ```bash
     ssh deploy@old-vps
     pm2 delete {site}-prod {site}-dev 2>/dev/null
@@ -115,14 +123,14 @@
 - Bootstrap нового VPS + add-site (`mkdir releases/`, ssh-copy-id, Caddyfile.d/) — за 15 мин.
 - Обновить `SSH_HOST` в Environment секрете → запустить workflow пустым коммитом → ждать прохождения билда (~3 мин на runner).
 - DNS переключить — Caddy выпишет SSL автоматически после propagate.
-- `data/leads.json` — из CRM-экспорта или последнего бэкапа (`scp` со старого, если он ещё в сети).
+- `shared/data/leads.jsonl` — `rsync` со старого VPS, если он ещё в сети; иначе восстановить лиды из подключённых каналов (почта/CRM).
 - Клиенту сразу сообщить: «Сайт переезжает, возможен downtime до 15 минут».
 - Soak и decommission по обычному плану.
 
 ## Для M4 (клон на другой домен)
 
 - `gh repo create --template <source-repo> tem11134v2-cmd/{new-site} --private --clone`.
-- Пройти как новый сайт: `_BUILD/HOW-TO-START.md` §0-§3 → `specs/00 → 13`.
+- Пройти как новый сайт: `_BUILD/HOW-TO-START.md` §0-§3 → `specs/00 → 14`.
 - `docs/spec.md`, `content.md`, `pages.md`, `integrations.md` — переписать под новый продукт.
 - Новая пара портов, новая строка в `ports.md`, новый Caddy-конфиг в `Caddyfile.d/{new-site}.caddy`.
 - Отдельный GitHub Environment + Secrets под новый сайт (даже если он на том же VPS — `vars.SITE_NAME` другое, разделение чистое).
