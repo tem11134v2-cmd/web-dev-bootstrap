@@ -2,7 +2,7 @@
 
 Самостоятельный гид для **владельца** и **коллаборатора** проекта на этом шаблоне. Покрывает все практические сценарии — от первичной настройки Mac до отката прода и подключения второго разработчика.
 
-> **Версия:** v3.2 (актуально для bootstrap'а на этом теге).
+> **Версия:** v4.0 (актуально для bootstrap'а на этом теге).
 >
 > Bootstrap рассчитан на **многостраничные SEO-сайты на Next.js** (лендинги, листинги услуг, MDX-блог) — не «один лендинг», а полноценный конверсионный сайт со структурой, метатегами, schema.org и формами.
 
@@ -96,10 +96,10 @@ xcode-select --install
 
 Проверка: `brew --version`
 
-### 0.4. GitHub CLI (gh) + mise (Node + pnpm)
+### 0.4. GitHub CLI (gh) + mise (Node + pnpm) + jq
 
 ```bash
-brew install gh mise
+brew install gh mise jq
 echo 'eval "$(mise activate zsh)"' >> ~/.zshrc
 source ~/.zshrc
 
@@ -108,7 +108,9 @@ mise use --global node@22 pnpm@latest
 
 `mise` — единый менеджер версий: ставит и Node, и pnpm, и любой другой тул, который понадобится. В каждом проекте читает `.tool-versions` и подменяет версии под локальный проект автоматически — никакого `nvm use` руками.
 
-Проверка: `gh --version && node --version && pnpm --version`
+`jq` нужен хукам проекта: без него guard-хуки работают fail-closed — блокируют команды с сообщением «jq not found».
+
+Проверка: `gh --version && node --version && pnpm --version && jq --version`
 
 Должно вывести что-то вроде:
 
@@ -185,6 +187,16 @@ mkdir -p ~/projects
 - `{domain}` — домен сайта без `https://` (например, `example.com`).
 - `<owner>` или `<твой-логин>` — твой GitHub-логин (для команд `gh`).
 
+### 0-Windows: если у тебя Windows, не Mac
+
+Тот же набор, другими установщиками. Дальнейший флоу (§1 и далее) — одинаковый.
+
+- **Git for Windows** (gitforwindows.org) — обязательно с git-bash: хуки проекта — bash-скрипты, без него не работают.
+- **Node 22** (nodejs.org или winget) + pnpm через corepack: `corepack enable && corepack prepare pnpm@latest --activate`.
+- **gh** и **jq**: `winget install GitHub.cli jqlang.jq` (или scoop).
+- Проверка в git-bash: `git --version && node --version && pnpm --version && gh --version && jq --version`.
+- Папка проектов: `~/projects` (в git-bash это твой профиль пользователя).
+
 ---
 
 ## 1. Получить проект
@@ -225,6 +237,15 @@ cd migrator
 - Терминал перейдёт в эту папку — ты готов к §2.
 
 Если ругается `already exists` — репо с таким именем уже есть в твоём аккаунте, выбери другое имя.
+
+**Сразу после создания репо:** открой `CLAUDE.md`, заполни `# Project:` реальным именем сайта (плюс однострочник «что за сайт») и удали BOOTSTRAP META-комментарий из шапки — он для bootstrap-режима, сайту не нужен.
+
+**Развилка «полный / лайт профиль»:**
+
+- **Полный** (дефолт) — `CLAUDE.md` из шаблона как есть, весь поток спек 00 → 12. Для многостраничных сайтов.
+- **Лайт** — лендинг на 1–3 страницы, где полный bootstrap избыточен: замени `CLAUDE.md` на `_BUILD/templates/claude-md-lite.md` (заполнив плейсхолдеры) и работай минимальным набором — бриф, дизайн, деплой.
+
+**Развилка «Источник дизайна»** (спросит спека `00-brief`): готовый макет (из Claude Design / HTML / скрины) → `specs/optional/opt-design-to-site.md`; референсы/конкуренты → `specs/optional/opt-design-from-references.md`; с нуля по брифу → обычный путь 03/04; маршрут D — перенос действующего сайта 1:1 → `specs/optional/opt-visual-recreate.md`.
 
 > **Если переезжаешь с уже работающего сайта (Tilda, WordPress, самописа…)** — `--template` команду выше ты всё равно используешь. Шаблон даёт `CLAUDE.md`, `docs/`, `specs/`, хуки — без них Claude не работает. А вот **до или параллельно** со спекой `00-brief.md` запусти `specs/optional/opt-migrate-from-existing.md` — она извлечёт со старого сайта тексты, медиа, URL-карту с 301-редиректами и заполнит `docs/spec.md` / `content.md` / `pages.md` за тебя (вместо ручного брифа). Дальше идёшь обычным потоком (02 → 03 → 04 → ...).
 >
@@ -353,7 +374,7 @@ pnpm dev
 # → http://localhost:3000
 ```
 
-Без `.env.production` формы пишут лиды в `data/leads.json` (fallback) — это нормально для локальной разработки.
+Без `.env.production` формы пишут лиды в `data/leads.jsonl` (fallback) — это нормально для локальной разработки.
 
 **5. Открыть в Claude Code Desktop** — см. §2.
 
@@ -402,15 +423,16 @@ Claude Desktop при открытии может предложить:
 
 В чате Claude Desktop ты вводишь обычные сообщения, но есть короткие команды, которые **начинаются со слэша** (`/`) и выполняют заранее заданную инструкцию. Они лежат в папке `.claude/commands/` репо как обычные `.md` файлы — Claude Desktop сканирует папку при старте сессии и предлагает их в auto-complete (когда ты начинаешь печатать `/` в чате — выпадает список).
 
-В нашем bootstrap'е v3 настроены **три** slash-команды:
+В нашем bootstrap'е v4.0 настроены **четыре** slash-команды:
 
 | Команда | Когда вызывать | Что делает |
 |---|---|---|
+| **`/orchestrate`** | Когда впереди **крупный пласт** — сайт целиком (02 → 12), rollout всех страниц, recreate/redesign | Включит оркестраторный режим: план волны, один батч-вопрос тебе (ключи/доступы/выборы), брифы субагентам, приём отчётов, verifier на крупные пласты. Правила — `docs/orchestration.md`. Для точечных правок не нужен — интерактив дешевле. |
 | **`/resume`** | В **начале** новой сессии (после `/clear` или нового чата) | Прочитает `.claude/memory/INDEX.md` и `project_state.md`, сверится с git (uncommitted, последние коммиты), кратко резюмирует где остановились — и **подождёт твоего ОК** перед работой. Если git и память разошлись — стопнет и спросит, не действует сам. |
 | **`/handoff`** | В **конце** сессии — перед `/clear`, перед закрытием чата, особенно если уходишь надолго | Обновит `.claude/memory/project_state.md`: добавит запись в Session log (что сделано), пересоберёт Active phase и Next steps, спросит про uncommitted-изменения (коммитить или сохранить как stash). Без `/handoff` следующая сессия **сможет восстановиться** через `git log` + чтение memory, но без свежей записи о том, что именно было сделано в этой сессии. |
 | **`/catchup`** | После **долгого перерыва** (несколько дней/недель), когда `/resume` дал короткое резюме, но хочется глубже понять что произошло | Глубже копнёт `git log`, последние PR, сравнит с памятью. Полезно когда в проекте параллельно работали другие разработчики и ты хочешь увидеть «что нового». |
 
-Подробное содержимое команд — в `.claude/commands/{handoff,resume,catchup}.md`. Их можно править под себя.
+Подробное содержимое команд — в `.claude/commands/{handoff,resume,catchup,orchestrate}.md`. Их можно править под себя.
 
 ### Цикл одной задачи
 
@@ -453,7 +475,7 @@ Claude Desktop при открытии может предложить:
 
 ### Если `/resume` или `/handoff` не работают
 
-Старые версии Claude Desktop могут не сканировать `.claude/commands/`. Тогда вручную (длинные эквиваленты):
+Если slash-команды не появились в auto-complete — ручные эквиваленты:
 
 - Вместо `/resume`:
   ```
@@ -561,26 +583,27 @@ git rebase --continue  # или git commit, если был merge
 ```
 
 Спека `01b` пошагово:
-1. Проверит, что у тебя готов VPS (если нет — отправит на `01a` + `bootstrap-vps.sh` для свежего Ubuntu)
-2. Сгенерирует SSH-ключ деплоя (`~/.ssh/{site}-deploy`), положит публичную часть в `authorized_keys` пользователя `deploy` на VPS
-3. Создаст в GitHub репо Environment `production` и положит туда секреты:
-   - `SSH_PRIVATE_KEY` (приватный из Mac)
+1. Проверит, что у тебя готов VPS (если нет — отправит на `docs/server-manual-setup.md` (`scripts/bootstrap-vps.sh`) для свежего Ubuntu)
+2. Даст тебе команду для генерации SSH-ключа деплоя на твоём Mac (`deploy/README.md` § 3) и для заливки публичной части в `authorized_keys` пользователя `deploy` на VPS — **генерируешь и загружаешь ты** (Claude приватные ключи не видит и не создаёт)
+3. Подскажет `gh secret set` для GitHub Environment `production` — загружаешь ты:
+   - `SSH_PRIVATE_KEY` (приватная часть с Mac)
    - `SSH_HOST`, `SSH_USER`, `SSH_PORT`
    - `PROD_ENV_FILE` (всё содержимое `.env.production`)
-4. Создаст `.github/workflows/deploy-prod.yml` (push-based: build на runner → rsync → симлинк-релиз)
+4. Создаст `.github/workflows/deploy-prod.yml` (push-based, один job: build на runner → tar.gz на VPS → проверки архива и `server.js` → симлинк-релиз → healthcheck с автооткатом)
 5. **Подскажет тебе** что делать с доменом — регистрация у регистратора и проставление A-записи на IP VPS это **твоя ручная работа в панели Reg.ru / GoDaddy / Cloudflare**, у Claude нет туда доступа. После того как пропишешь записи (см. §11) — Claude проверит через `dig +short {domain}`, что DNS распространился.
-6. Сделает первый push в `main` → Actions запустит первый деплой → Caddy получит сертификат при первом HTTPS-запросе (только когда A-запись уже работает — иначе Caddy упадёт на ACME-challenge).
+6. Запушит в `dev` и откроет PR; после твоего merge Actions запустит первый деплой (прямой push в `main` — только если branch protection недоступна) → Caddy получит сертификат при первом HTTPS-запросе (только когда A-запись уже работает — иначе Caddy упадёт на ACME-challenge).
 
 ### 6.2. Если VPS уже есть (multi-site)
 
 Если на VPS уже работают другие сайты, и ты хочешь подселить новый:
 
 ```
-Пройди по docs/server-add-site.md — у меня уже есть VPS, на нём работают другие сайты,
-надо подключить новый сайт {site}. Выдели свободный порт из ~/ports.md, добавь блок
-в /etc/caddy/Caddyfile.d/{site}.caddy, подними PM2-процесс {site}-prod.
-После этого пройди specs/01b-server-handoff.md для настройки GitHub Actions
-(SSH-ключ деплоя, Environment 'production' с секретами, .github/workflows/deploy-prod.yml).
+Сначала пройди specs/01b-server-handoff.md — сгенерируй deploy workflows,
+deploy/{site}.caddy.example и deploy/README.md для сайта {site}.
+Затем пройди docs/server-add-site.md — у меня уже есть VPS, на нём работают другие
+сайты: зарезервируй свободные порты в ~/ports.md, создай папки releases/ и shared/data,
+положи Caddy-конфиг, добавь deploy-ключ, заполни Secrets/Variables.
+PM2-процесс {site}-prod руками не поднимай — его стартанёт первый зелёный workflow.
 ```
 
 Замени `{site}` на имя сайта (то же что в `package.json#name`).
@@ -638,7 +661,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection \
 **Что коллеге доступно:**
 - Read/Write на код (через PR в `dev`)
 - `.claude/memory/` файлы — да, синхронизируются через git (см. §4 про конфликты)
-- `data/leads.json` — нет, это runtime data, gitignored
+- `data/` (fallback-лиды `leads.jsonl`) — нет, это runtime data, gitignored
 - `.env.production` — нет, gitignored
 
 ### 7.4. Что делать когда коллега уходит
@@ -653,7 +676,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection \
 
 ### 8.1. `[владельцу]` Как обновить секрет
 
-В GitHub → Settings → Environments → `production` лежит один multiline-секрет `PROD_ENV_FILE` = всё содержимое твоего `.env.production`. Каждый push в `main` запускает workflow, тот пишет файл в `releases/<sha>/.env` рядом со standalone-сборкой и переключает симлинк `current/`. PM2 видит свежие env через `pm2 reload --update-env`.
+В GitHub → Settings → Environments → `production` лежит один multiline-секрет `PROD_ENV_FILE` = всё содержимое твоего `.env.production`. Каждый push в `main` запускает workflow, тот пишет файл в `releases/<sha>/.env` рядом со standalone-сборкой, переключает симлинк `current/` и перезапускает процесс (`pm2 delete` + `start` — свежие env подхватываются при старте).
 
 **Когда поменялись секреты** (новый TG-токен, ротация SMTP-пароля, ...):
 
@@ -669,7 +692,7 @@ gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} \
 git commit --allow-empty -m "chore: bump env" && git push origin main
 ```
 
-**Fallback (когда Actions недоступны или надо быстро).** Промпт Claude'у: «**синхронизируй .env на прод как fallback**» — он прогонит `scripts/sync-env.sh`, патчит `current/.env` через симлинк и делает `pm2 reload`. Это **временно**: следующий push в main перезапишет файл из `PROD_ENV_FILE` секрета, поэтому `gh secret set` всё равно нужен, чтобы изменение пережило деплой.
+**Fallback (когда Actions недоступны или надо быстро).** Промпт Claude'у: «**синхронизируй .env на прод как fallback**» — он прогонит `scripts/sync-env.sh`, патчит `current/.env` через симлинк и делает `pm2 restart --update-env` (симлинк не менялся — restart достаточно). Это **временно**: следующий push в main перезапишет файл из `PROD_ENV_FILE` секрета, поэтому `gh secret set` всё равно нужен, чтобы изменение пережило деплой.
 
 ### 8.2. `[коллаборатору]` Если нужен новый секрет в `.env`
 
@@ -683,7 +706,7 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 2. Перепишет GitHub Environment-секрет: `gh secret set --env production PROD_ENV_FILE < .env.production`
 3. Триггерит деплой пустым коммитом или повторным запуском workflow — секрет приедет на VPS в рамках следующего push'а.
 
-Для **сборочного времени** (нужна публичная переменная типа `NEXT_PUBLIC_FEATURE_FLAG_X` чтобы локально протестить) — попроси владельца добавить её также в repo-level Secrets (она используется в build-job до того, как Environment подтягивается). Локально ты можешь прописать её в свой `.env.local` (gitignored) на время разработки.
+Для **сборочного времени** (нужна публичная переменная типа `NEXT_PUBLIC_FEATURE_FLAG_X`) — попроси владельца добавить её в secrets GitHub Environment (`production`, и `dev` если есть) — единое место для `NEXT_PUBLIC_*`, как в шаблонах yml. Локально ты можешь прописать её в свой `.env.local` (gitignored) на время разработки.
 
 ---
 
@@ -691,7 +714,7 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 
 ### 9.1. `[владельцу]` Сломал прод?
 
-Промпт Claude'у: «**откати прод на предыдущий релиз**» — Claude прогонит `scripts/rollback.sh` (атомарный switch симлинка `current → releases/<previous-sha>` + `pm2 reload`, миллисекунды, без пересборки) и подскажет команду для `git revert + push`, чтобы починка пошла через Actions поверх.
+Промпт Claude'у: «**откати прод на предыдущий релиз**» — Claude прогонит `scripts/rollback.sh` (атомарный switch симлинка `current → releases/<previous-sha>` + `pm2 delete`/`start`, миллисекунды, без пересборки) и подскажет команду для `git revert + push`, чтобы починка пошла через Actions поверх.
 
 `<hash>` — короткий идентификатор коммита, обычно 7 символов вроде `abc1234`. Видно в `git log` или в URL GitHub-коммита (последние 7 символов после `/commit/`).
 
@@ -710,7 +733,7 @@ git commit --allow-empty -m "chore: bump env" && git push origin main
 
 ## 10. Мигрировать старый сайт (v2.x → v3) `[владельцу]`
 
-Если у тебя есть сайт, поднятый из bootstrap'а старой версии (v2.0–v2.4) и хочется переехать на v3.0 — это отдельная задача, не обязательная.
+Если у тебя есть сайт, поднятый из bootstrap'а старой версии (v2.0–v2.4) и хочется переехать на v3.0 — это отдельная задача, не обязательная. Миграционный промт (`_BUILD/v3/`) поднимает старый сайт до v3.0-структуры; дальнейшее обновление до v4.0 — обычным подтягиванием актуального `main` шаблона.
 
 ### Как это работает (без локальной копии bootstrap'а)
 
@@ -768,73 +791,29 @@ git clone https://github.com/tem11134v2-cmd/web-dev-bootstrap.git \
 
 ## 11. Подключить домен (делает человек, не Claude)
 
-> Делается один раз на каждый домен. Это ручная работа в панели регистратора — Claude сюда не лезет (нет доступа). После прописки записей Claude проверит распространение через `dig`.
+Один раз на домен, руками в панели регистратора — у Claude туда доступа нет; после прописки Claude сам проверит распространение (`dig +short {domain}`).
 
-### 11.1. Решить: Cloudflare или прямые A-записи
-
-- **Прямые A-записи у регистратора** — проще, хватает для большинства проектов. DNS управляешь через панель регистратора.
-- **Cloudflare** — добавляется если нужны CDN / DDoS-защита / edge-кэш / WAF или просто удобная DNS-панель.
-
-Ниже — оба варианта.
-
-### 11.2. Вариант A: прямые A-записи у регистратора
-
-Зайди в панель регистратора (Reg.ru, GoDaddy, Namecheap, Cloudflare Registrar) → DNS-записи домена.
-
-Добавь:
-
-| Тип | Имя         | Значение         | TTL     |
-|-----|-------------|------------------|---------|
-| A   | `@`         | `{vps-ip}`       | 300–3600|
-| A   | `www`       | `{vps-ip}`       | 300–3600|
-| A   | `dev`       | `{vps-ip}`       | 300–3600| ← только если нужен preview-поддомен
-
-`@` означает сам корень домена (`example.com`), `www` — алиас, `dev` — поддомен для preview.
-
-### 11.3. Вариант B: Cloudflare
-
-1. Заведи сайт в Cloudflare → получи два их NS-сервера.
-2. У регистратора поменяй NS-серверы домена на cloudflare-ские. Подожди 1–24 часа (обычно 10 минут).
-3. В Cloudflare → DNS → добавь те же A-записи что в варианте A. **Важно:** на время первого выпуска сертификата Caddy'ем **включи DNS-only (серое облачко) на `@` и `www`** — иначе CF перехватит HTTP-01 challenge на `/.well-known/acme-challenge/` и выпуск зациклится. После того как `journalctl -u caddy | grep "certificate obtained"` покажет успех — можно вернуть оранжевое облачко (proxy). На `dev` обычно держат серое облачко всегда.
-4. SSL/TLS → **Full (strict)** после того, как Caddy выпустит Let's Encrypt-сертификат.
-
-### 11.4. Проверить распространение
-
-На Mac или на VPS:
-
-```bash
-dig +short {domain}                 # должен вернуть {vps-ip}
-dig +short www.{domain}             # то же
-dig +short dev.{domain}             # если добавлял dev
-```
-
-Если `dig` пусто или возвращает другой IP — подожди ещё 10 минут, в панели регистратора DNS распространяется не мгновенно. TTL=300 помогает сократить ожидание.
-
-На Cloudflare proxied (оранжевое облачко) `dig` вернёт IP Cloudflare, не твой VPS — это нормально, но HTTP-01 challenge с такого облачка к Caddy не дойдёт. Для первого выпуска временно переключи в DNS-only (см. п.3 выше).
-
-### 11.5. Дальше — SSL автоматически
-
-Без правильных A-записей Caddy не сможет пройти HTTP-01 challenge — лог будет крутить `obtain: ...`. Когда A-запись правильная — Caddy сам выпустит сертификат при первом HTTPS-запросе.
-
-### 11.6. Частые проблемы с DNS
-
-- **`dig` пустой через 30 минут** → проверь, точно ли в панели сохранилась запись и нет ли CAA-записи, которая запрещает Let's Encrypt.
-- **Caddy крутит «obtain: solving HTTP-01 challenge»** → A-запись ведёт не на этот VPS, или домен proxied через Cloudflare. `dig +short {domain}` должен показать IP сервера; для CF — DNS-only на время выпуска.
-- **Сертификат выписался, но HTTPS отдаёт self-signed / handshake fails** → Caddy кладёт сертификаты в `/var/lib/caddy/.local/share/caddy/certificates/...`. Проверь `journalctl -u caddy --since "1 hour ago" | grep -iE "certificate|tls"`. Часто причина — между Caddy и клиентом стоит CF в Flexible mode (нужен Full strict).
-- **Почтовые MX-записи пропали при переносе на Cloudflare** → Cloudflare импортирует не все типы. Проверь MX, SPF, DKIM, DMARC вручную по старой панели.
-
-### 11.7. Записать в память проекта
-
-В `.claude/memory/references.md` зафиксируй:
-- Где зарегистрирован домен (регистратор, аккаунт).
-- Используется ли Cloudflare (да/нет, какой аккаунт).
-- Дата истечения домена — поставь календарный reminder за 30 дней.
-
-**Никогда не клади сюда** пароли, API-ключи, секреты. Только ссылки и факты.
+- Пропиши A-записи `@` и `www` (и `dev`, если нужен preview) на `{vps-ip}`.
+- Cloudflare: на время первого выпуска сертификата держи DNS-only (серое облачко), иначе Caddy не пройдёт HTTP-01 challenge.
+- SSL дальше автоматически — Caddy выпустит сертификат при первом HTTPS-запросе.
+- Полный справочник (варианты записей, Cloudflare, CAA/MX, частые проблемы, что записать в память проекта) — `docs/domain-connect.md`.
 
 ---
 
 ## 12. Если что-то сломалось (troubleshooting)
+
+Полный справочник — `docs/troubleshooting.md` (Claude читает его сам, когда что-то падает): деплой (SSH permission denied, симлинк `current`, scp/tar, PM2 и `server.js`), Caddy и SSL, DNS/Cloudflare, branch protection на private+free, prod 404 после билда, прочие частые косяки.
+
+Быстрая диагностика упавшего workflow — не в Actions UI, а:
+
+```bash
+gh run list --limit 5
+gh run view <run-id> --log-failed   # только упавшие шаги
+```
+
+Если Claude залип / повторяет круги — `/clear` → `/resume`. Если после `/resume` он думает, что вы в другой фазе — поправь руками `Active phase` в `.claude/memory/project_state.md` и перезапусти `/resume`.
+
+Ниже — только два сценария, завязанные на локальные хуки и дисциплину push.
 
 ### 12.1. gh auth mismatch — push блокируется хуком
 
@@ -857,201 +836,7 @@ gh auth switch -h github.com -u <owner>  # переключить
 
 После — повторить `git push`. Если push без хука уже прошёл и попал в чужой репо — связаться с владельцем чужого репо и попросить закрыть PR / удалить ветку.
 
-### 12.2. DDoS-Guard 301 при smoke-тесте до DNS cutover
-
-**Симптом:** `curl -H "Host: example.com" http://NEW_VPS_IP/` возвращает `301` от `Server: ddos-guard` с заголовком `x-tilda-server: 29`.
-
-**Причина:** A-запись домена ещё указывает на старый IP (Tilda → DDoS-Guard). Middlebox (РКН/ISP) видит Host-header и перенаправляет на DDoS-Guard, **даже если TCP идёт на нужный IP**.
-
-**Фикс:** не использовать доменное имя в Host-header до cutover.
-
-```bash
-# Плохо:
-curl -H "Host: example.com" http://NEW_VPS_IP/
-
-# Хорошо (IP-only):
-curl -H "Host: NEW_VPS_IP" http://NEW_VPS_IP/
-
-# Или через /etc/hosts override:
-echo "NEW_VPS_IP example.com" | sudo tee -a /etc/hosts
-curl -I https://example.com/
-# не забыть откатить /etc/hosts после теста
-```
-
-### 12.3. SSH permission denied в deploy job
-
-**Симптом:** Actions падает на шаге `Setup SSH` или `Rsync to release dir` с `Permission denied (publickey)` от VPS.
-
-**Причина (любая из):**
-1. Public-часть `~/.ssh/{site}-deploy.pub` не добавлена в `/home/deploy/.ssh/authorized_keys` на VPS.
-2. В `secrets.SSH_PRIVATE_KEY` лежит другой ключ (не парный к `authorized_keys` на VPS).
-3. `secrets.SSH_USER` не `deploy`, или `SSH_PORT` не совпадает с реальным портом sshd.
-4. `secrets.SSH_HOST` показывает на старый IP (после миграции).
-
-**Фикс:**
-
-```bash
-# На Mac — проверить, что приватный ключ парный к публичному, который копировал на VPS:
-ssh-keygen -y -f ~/.ssh/{site}-deploy   # печатает публичную часть из приватного
-ssh-copy-id -i ~/.ssh/{site}-deploy.pub -p {ssh-port} deploy@{vps-ip}  # перезаливает public на VPS
-
-# Если приватный ключ удалил с Mac после загрузки в Secrets — сгенерируй новый:
-ssh-keygen -t ed25519 -f ~/.ssh/{site}-deploy -N "" -C "{site}-deploy"
-ssh-copy-id -i ~/.ssh/{site}-deploy.pub -p {ssh-port} deploy@{vps-ip}
-gh secret set SSH_PRIVATE_KEY --env production --repo {owner}/{site} \
-  < ~/.ssh/{site}-deploy
-
-# Re-run упавший workflow:
-gh run rerun <run-id> --failed
-```
-
-### 12.4. Симлинк `current` не переключился
-
-**Симптом:** workflow зелёный, но `https://{domain}` отдаёт старую версию. На VPS `readlink ~/prod/{site}/current` показывает прошлый sha.
-
-**Причины:**
-1. Шаг `Activate release` упал тихо — посмотри `gh run view <run-id> --log` в этой секции.
-2. Симлинк существует и `ln -sfn` ничего не делает: `current` — это **папка** (не симлинк) после ручных правок. Проверь `ls -la ~/prod/{site}/ | grep current` — должно быть `current -> releases/<sha>`.
-3. PM2-процесс закэшировал путь: `pm2 reload --update-env` дёрнули, но процесс падает на старте и идёт `restart loop` со старым кодом. `pm2 logs {site}-prod` покажет.
-
-**Фикс (вручную на VPS):**
-```bash
-ssh deploy@{vps-ip}
-cd ~/prod/{site}
-ls -1 releases/                                     # где новый sha?
-ln -sfn releases/<new-sha> current
-pm2 reload {site}-prod --update-env
-readlink current && pm2 list                         # симлинк и процесс OK?
-```
-
-### 12.5. rsync завершился с ошибкой
-
-**Симптом:** Шаг `Rsync to release dir` падает с одним из:
-- `rsync: failed to connect to host` — сетевой issue или wrong `SSH_HOST`.
-- `rsync: mkdir failed: Permission denied` — `~/prod/{site}/` не существует или принадлежит не `deploy`.
-- `rsync: write failed: No space left on device` — забит диск.
-- `rsync: change_dir … failed` — на runner-е пустой `deploy/` (билд не положил artefact).
-
-**Фикс:**
-```bash
-# На Mac или с VPS:
-ssh deploy@{vps-ip} 'df -h ~ && ls -ld ~/prod/{site}/releases'
-# Если диск > 90% — почистить старые релизы (workflow держит last 5, иначе можно вручную):
-ssh deploy@{vps-ip} 'cd ~/prod/{site}/releases && ls -1tr | head -n -3 | xargs -r rm -rf'
-
-# Если папки нет — создать:
-ssh deploy@{vps-ip} 'mkdir -p ~/prod/{site}/releases'
-
-# Если build на runner-е положил пустой deploy/ — посмотри лог build job, обычно
-# проблема в том, что output: 'standalone' не включён в next.config.ts.
-```
-
-### 12.6. PM2 не находит `server.js` в `current/`
-
-**Симптом:** Шаг `Activate release` падает на `pm2 start current/server.js` с `ENOENT` или `not such file`.
-
-**Причины:**
-1. Это первый деплой — `current/` ещё не существует, симлинк надо поставить **до** `pm2 start`. Workflow уже это делает (`ln -sfn` идёт раньше `pm2 start`), но если порядок шагов в кастомизированном workflow поломан — фейл.
-2. Standalone-сборка не положила `server.js`: либо `output: 'standalone'` не включён в `next.config.ts`, либо `pnpm build` упал и upload-artifact затащил пустой `deploy/`.
-3. Шаг «Pack standalone bundle» в build job не скопировал `.next/standalone/.` в `deploy/` (опечатка в путях).
-
-**Фикс на VPS вручную (если первый деплой):**
-```bash
-ssh deploy@{vps-ip}
-ls -la ~/prod/{site}/current ~/prod/{site}/releases/<sha>/server.js
-# Если symlink есть, server.js нет — проблема в build job, не на VPS.
-# Если symlink нет — поставь руками и запусти PM2:
-ln -sfn ~/prod/{site}/releases/<sha> ~/prod/{site}/current
-pm2 start ~/prod/{site}/current/server.js --name {site}-prod --update-env
-pm2 save
-```
-
-### 12.7. Caddy не стартует / падает после правки
-
-**Симптом:** `systemctl status caddy` показывает `failed`, или сайты возвращают 502 после `systemctl reload caddy`.
-
-**Диагностика:**
-
-```bash
-sudo systemctl status caddy --no-pager
-sudo journalctl -u caddy -n 50 --no-pager
-sudo caddy validate --config /etc/caddy/Caddyfile
-```
-
-`caddy validate` покажет точный файл и строку с ошибкой. Типичные причины:
-- Опечатка в Caddyfile (забытая `}`, пробел перед `{`, неверная директива).
-- Конфликт портов: ещё что-то слушает 80/443 (старый nginx/Apache не выключен после миграции — `sudo systemctl stop nginx; sudo systemctl disable nginx`).
-- Caddy не может писать в `/var/lib/caddy/` (проверь `ls -la /var/lib/caddy`, владелец должен быть `caddy:caddy`).
-
-**Фикс:** правишь файл → `sudo caddy validate` → `sudo systemctl reload caddy`. Если сломал не один сайт, а сразу все — последний рабочий конфиг виден в `journalctl -u caddy --since "1 hour ago"`.
-
-### 12.8. SSL не выписывается (Caddy)
-
-**Симптом:** HTTPS на новом домене возвращает `connection refused` или сертификат self-signed; в логах `obtain: ...`, `solving: HTTP-01 challenge ...`.
-
-**Причины (по частоте):**
-1. **DNS не указывает на VPS** — `dig +short {domain}` возвращает чужой IP или ничего. ACME-серверу некуда стучаться. Дождись пропагации или поправь A-запись (см. §11).
-2. **Порт 80 закрыт** — HTTP-01 challenge идёт на 80, не на 443. `sudo ufw status` должен показывать `80/tcp ALLOW`. Без 80 ACME не пройдёт никогда.
-3. **Cloudflare proxy включён (оранжевое облачко)** — CF перехватывает `/.well-known/acme-challenge/`. Временно выключи proxy (серое облачко), дождись `certificate obtained`, включи обратно. Альтернатива — DNS-01 через Caddy plugin (отдельная сборка `xcaddy`).
-4. **Лимит Let's Encrypt** — 5 неудачных попыток на домен в час, 50 успешных в неделю. Если упёрся — Caddy сам фолбэчит на ZeroSSL (если в Caddyfile не зафиксирован issuer).
-
-**Что обычно НЕ нужно делать:** `sudo systemctl restart caddy`, `caddy reload`. Caddy сам ретраится с экспоненциальным бэкоффом. Рестарт сбрасывает счётчик попыток и может ускорить упирание в лимит.
-
-### 12.9. Branch protection 403 на private + free
-
-**Симптом:** `gh api -X PUT repos/.../branches/main/protection` возвращает `403 Upgrade to GitHub Pro or make this repository public`.
-
-**Причина:** GitHub в 2024+ убрал protection из бесплатного плана для приватных репозиториев. Public repo + free — protection доступна. Private + free — нет.
-
-**Фикс:** для one-dev — пропустить protection, держать дисциплину PR-flow. Альтернативы: GitHub Pro ($4/мес) или сделать репо public.
-
-### 12.10. Swap не пересоздаётся при повторном bootstrap VPS
-
-**Симптом:** На VPS уже был `/swapfile` 512 MB (Timeweb default). После `bootstrap-vps.sh` swap остался 512 MB вместо 2 GB.
-
-**Причина:** старая версия скрипта пропускала шаг, если swapfile уже был.
-
-**Фикс:** с v2.2 скрипт сам пересоздаёт swapfile, если размер не совпадает с `SWAP_SIZE`. Если у вас старая версия — вручную:
-
-```bash
-ssh root@VPS
-swapoff /swapfile
-rm /swapfile
-# затем перезапустить bootstrap или вручную:
-fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-```
-
-### 12.11. Prod отдаёт 404 на новой странице после билда
-
-**Симптом:** на новой странице `curl https://{domain}/uslugi/foo` отдаёт 404, хотя в `app/uslugi/foo/page.tsx` файл есть и в локальном `pnpm build` страница появляется.
-
-**Причины (push-based):**
-1. PM2 показывает на старый релиз через симлинк `current` — workflow прошёл, но `Activate release` шаг по какой-то причине не переключил `current`. Проверь `readlink ~/prod/{site}/current` — последний ли это sha?
-2. Page-маршрут с динамическим сегментом (`[slug]`) и `generateStaticParams` не вернул нужный slug — он не попал в `.next/server/app/`. Это не VPS-проблема, а билд-проблема.
-3. PM2 застрял в crashloop на старте нового релиза и продолжает обслуживать старый код. `pm2 logs {site}-prod --lines 50` покажет.
-
-**Фикс:**
-```bash
-ssh deploy@{vps-ip}
-readlink ~/prod/{site}/current                                  # совпадает с github.sha из последнего workflow?
-ls ~/prod/{site}/current/.next/server/app/uslugi/                # есть foo.html?
-pm2 reload {site}-prod --update-env                              # форсированный reload
-pm2 list                                                         # status: online?
-```
-
-Если `current` указывает на свежий sha, а 404 остаётся — проверь `pnpm build` локально и убери проблему на стороне кода / `generateStaticParams`.
-
-### 12.12. Workflow logs через `gh`
-
-Если деплой упал, не лезь в Actions UI — быстрее:
-
-```bash
-gh run list --limit 5
-gh run view <run-id> --log
-gh run view <run-id> --log-failed   # только упавшие шаги
-```
-
-### 12.13. Pre-push checklist (Mac)
+### 12.2. Pre-push checklist (Mac)
 
 Перед серьёзным push в main:
 
@@ -1059,18 +844,8 @@ gh run view <run-id> --log-failed   # только упавшие шаги
 gh auth status                # active = <owner>?
 git status                    # working tree clean?
 git log origin/main..HEAD     # что именно уезжает?
-pnpm lint && pnpm build       # локально билд проходит?
+pnpm typecheck && pnpm lint && pnpm build   # локально гейты и билд проходят?
 ```
-
-### 12.14. Прочие частые косяки
-
-- **`gh: command not found`** — открой новое окно Terminal или `source ~/.zprofile`.
-- **«Папка проекта не видна в Claude Desktop»** — `Select folder` (не `Select file`), и проверь что выбрал `~/projects/{site}`, а не родитель.
-- **Claude пишет «я не вижу файлов»** — он ещё не прочитал `CLAUDE.md`. Отправь промпт из §3.
-- **`gh repo create` → «already exists»** — выбери другое имя или удали старый в Settings репо.
-- **`git revert` падает «commit has more than one parent»** — это merge-коммит (PR merge). Используй `git revert -m 1 <hash>`.
-- **«Claude залип / повторяет круги»** — `/clear` → `/resume`. Свежий 200K-контекст обычно лучше чем починка отравленного.
-- **«После `/resume` Claude думает что мы в другой фазе»** — открой `.claude/memory/project_state.md`, поправь руками раздел `Active phase` под реальность, перезапусти `/resume`. Это редко случается, обычно когда несколько worktree-сессий писали в один файл (запрещено протоколом, см. §4).
 
 ---
 
@@ -1078,10 +853,10 @@ pnpm lint && pnpm build       # локально билд проходит?
 
 В папке `~/ClaudeCode/web-dev-bootstrap` — новый чат.
 
-- **Если рефакторишь bootstrap по большому ТЗ** (типа `_BUILD/v3/01-bootstrap-refactor.md`) — стартовый промпт описан в начале самого ТЗ. Память bootstrap'а сама помнит активную фазу через `.claude/memory/project_state.md`.
+- **Если рефакторишь bootstrap по большому ТЗ** (примеры прошлых — в `_BUILD/archive/`, напр. `01-bootstrap-refactor.md`) — стартовый промпт описан в начале самого ТЗ. Память bootstrap'а сама помнит активную фазу через `.claude/memory/project_state.md`.
 - **Если просто точечная правка** — `/resume` или прямой промпт «улучшить шаблон в [файл]: [описание]».
 
-Изменения коммитятся в feature-ветку, мёрджатся PR в `main` через `gh pr merge --squash`, ставится семвер-тег (`v3.0.x`, `v3.1` и т.д.) и запись в `_BUILD/changelog.md` сверху.
+Изменения коммитятся в feature-ветку, мёрджатся PR в `main` через `gh pr merge --squash`; схема rolling-main — теги только для major-вех (`v4.0`, `v4.5` и т.п.), запись в `_BUILD/changelog.md` сверху.
 
 ---
 
@@ -1106,4 +881,4 @@ pnpm lint && pnpm build       # локально билд проходит?
 - **Сайт надо переехать на другой VPS** → спека `14-migrate.md` (4 сценария M1–M4, 7-day soak).
 - **Миграция с живого сайта** (Tilda/WP) → `specs/optional/opt-migrate-from-existing.md`.
 - **Обычные правки уже живого сайта** → спека `13-extend-site.md` (циклическая).
-- **Перевести старый сайт (v2.x bootstrap) на v3.0** → §10.
+- **Перевести старый сайт (v2.x bootstrap) на v3.0** → §10 (миграционный промт `_BUILD/v3/` поднимает до v3.0-структуры; дальше до v4.0 — обычным подтягиванием `main` шаблона).

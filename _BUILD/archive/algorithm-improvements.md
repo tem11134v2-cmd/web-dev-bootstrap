@@ -1,3 +1,5 @@
+> **АРХИВ (v4.0):** исторический документ, не источник истины. Актуальное: `specs/optional/opt-visual-recreate.md`.
+
 # opt-visual-recreate — полевой отчёт → правки шаблона
 
 **Назначение.** Этот файл — вход для сессии, которая **редактирует основной шаблон** (`specs/optional/opt-visual-recreate.md`, `_BUILD/v3/visual-recreate-plan.md`, при необходимости `00-brief` / `02-project-init`). Собран по реальному прогону переноса **rus-campers.com (Tilda)** с нуля до полной главной + мобилки.

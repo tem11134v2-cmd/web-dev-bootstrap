@@ -1,3 +1,5 @@
+> **АРХИВ (v4.0):** исторический документ, не источник истины. Актуальное: `_BUILD/changelog.md`.
+
 # ТЗ-1: Рефакторинг bootstrap v2.2.x → v3.0
 
 **Это большое ТЗ для последовательной работы в нескольких Claude-сессиях в bootstrap-репо.** Финальный артефакт — bootstrap v3.0 с современной инфраструктурой (Caddy, push-based deploy, Next.js 16 паттерны, Biome, pnpm, Content Collections, Cloudflare Turnstile, sequential multi-Claude handoff).
