@@ -146,6 +146,8 @@ systemctl enable --now unattended-upgrades
 # ─────────────────────────────────────────────
 # 4. Swap
 # ─────────────────────────────────────────────
+# Билд идёт на GitHub-runner — swap НЕ для сборки. Это страховка runtime на
+# малом RAM (≤2–4 GB): спайки RSS node-процессов, PM2, несколько сайтов разом.
 log "[4/8] Swap ($SWAP_SIZE)"
 # Pre-clean: если /swapfile уже есть, но не нужного размера — пересоздать.
 # Иначе ранее присутствующий 512M-файл (Timeweb default) останется как есть.
@@ -169,7 +171,7 @@ fi
 # 5. Стек: Node runtime, Caddy, PM2
 # ─────────────────────────────────────────────
 # Под push-based deploy на VPS нужен только runtime: Node + PM2.
-# Билд (pnpm install + pnpm build) делает GitHub-runner; артефакт rsync-ится сюда.
+# Билд (pnpm install + pnpm build) делает GitHub-runner; артефакт распаковывается сюда из tar.gz (scp).
 # Поэтому ни pnpm, ни git на VPS больше не нужны.
 log "[5/7] Stack (Node $NODE_MAJOR runtime, Caddy, PM2)"
 if ! command -v node >/dev/null || [ "$(node -v | cut -c2- | cut -d. -f1)" != "$NODE_MAJOR" ]; then

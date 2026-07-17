@@ -12,16 +12,17 @@
 
 ## Файлы
 
-- [project_state.md](project_state.md) — активная фаза, текущая спека, блокеры, что следующее
+- [project_state.md](project_state.md) — активная фаза, текущая спека, блокеры, Task ledger (оркестраторные волны), Session log
 - [decisions.md](decisions.md) — принятые решения с обоснованием **Why:**
 - [feedback.md](feedback.md) — правила и табу заказчика с **Why:**
-- [references.md](references.md) — внешние ID, URL, credentials (без секретов!), пути
+- [references.md](references.md) — реестр ID/URL внешних сервисов (никогда секреты), пути
 - [lessons.md](lessons.md) — кейсы аварий и фиксов («это сломалось — починили так»)
 - [pointers.md](pointers.md) — где в коде какой переиспользуемый паттерн/компонент
+- `archive/` — старые записи Session log: ротация из `project_state.md` (≤15 записей в логе, старше — сюда)
 
 ## Когда обновлять (триггеры)
 
-См. секцию `Memory update triggers` в `CLAUDE.md` корня проекта.
+См. секцию `Memory triggers (when to update .claude/memory/)` в `CLAUDE.md` корня проекта.
 
 ## Что НЕ класть сюда
 

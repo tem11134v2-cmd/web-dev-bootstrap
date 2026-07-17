@@ -27,10 +27,10 @@ yarn-error.log*
 pnpm-debug.log*
 .pm2/
 
-# Runtime data
-data/leads.json
-data/*.sqlite
-data/*.db
+# Runtime data — каталог целиком: fallback-лиды data/leads.jsonl, заказы
+# data/orders.jsonl (ecommerce), sqlite и прочие накопители. Каталог с ПДн
+# не коммитится никогда.
+data/
 
 # Editor / OS
 .DS_Store

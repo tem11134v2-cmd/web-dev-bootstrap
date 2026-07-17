@@ -16,6 +16,11 @@
 # Local file:  ~/projects/<site>/.env.production (gitignored)
 # Remote file: /home/deploy/prod/<site>/current/.env (resolves into the active
 #              releases/<sha>/.env via the symlink; chmod 600)
+#
+# Перезапуск: симлинк `current` тут НЕ меняется, поэтому достаточно
+# `pm2 restart {site}-prod --update-env` (просто restart без --update-env env
+# не перечитает). `delete` + `start` нужны только после смены симлинка —
+# см. scripts/rollback.sh и docs/deploy.md.
 
 set -euo pipefail
 
@@ -54,7 +59,7 @@ echo "About to sync secrets (FALLBACK — bypasses GitHub Actions):"
 echo "  local file:  $LOCAL_ENV ($(wc -l <"$LOCAL_ENV" | tr -d ' ') lines, $(wc -c <"$LOCAL_ENV" | tr -d ' ') bytes)"
 echo "  remote host: $ssh_alias"
 echo "  remote path: $remote_path  (resolves into the active release via the 'current' symlink)"
-echo "  pm2 process: $pm2_name (will be reloaded with --update-env)"
+echo "  pm2 process: $pm2_name (will be restarted with --update-env; symlink unchanged)"
 echo
 echo "Note: next push to main will overwrite this from the PROD_ENV_FILE secret."
 echo "      If you want the change to stick — also update the GitHub secret."
@@ -66,7 +71,8 @@ case "$confirm" in
 esac
 
 scp -q "$LOCAL_ENV" "${ssh_alias}:${remote_path}"
-ssh "$ssh_alias" "chmod 600 ${remote_path} && pm2 reload ${pm2_name} --update-env >/dev/null && pm2 save >/dev/null"
+# Симлинк не менялся → restart --update-env достаточно (не delete+start).
+ssh "$ssh_alias" "chmod 600 ${remote_path} && pm2 restart ${pm2_name} --update-env >/dev/null && pm2 save >/dev/null"
 
 echo "OK. Verifying first non-empty var on the server:"
 first_var=$(grep -E '^[A-Z_][A-Z0-9_]*=' "$LOCAL_ENV" | head -1 | cut -d= -f1)

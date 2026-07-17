@@ -1,23 +1,43 @@
 #!/usr/bin/env bash
-# session-start: informational checks at the beginning of a Claude session.
-# Never blocks (exit 0 always). Prints warnings to stderr so Claude sees them.
+# session-start: информационные проверки при старте сессии Claude.
+# Никогда не блокирует (всегда exit 0).
+# ВАЖНО: весь вывод — в stdout. У SessionStart-хука stdout попадает в контекст
+# Claude; stderr при exit 0 не видит никто.
 
 set -uo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+# session_id — из stdin-JSON хука; fallback на PPID, если jq недоступен.
+input=$(cat 2>/dev/null || true)
+session_id=""
+if command -v jq >/dev/null 2>&1; then
+  session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)
+fi
+[ -z "$session_id" ] && session_id="$PPID"
+
+root="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root" || exit 0
 
-# Skip if not a git repo.
+# Не git-репо — выходим.
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
-# Record HEAD at session start so stop-reminder.sh can detect commits made this session.
-# Per-PPID isolates parallel Claude instances on the same Mac.
-git rev-parse HEAD 2>/dev/null > "/tmp/.claude-session-start-sha-$PPID" 2>/dev/null || true
+# Фиксируем HEAD на старте сессии, чтобы stop-reminder.sh видел коммиты сессии.
+# .claude/state/ в .gitignore; файл на session_id изолирует параллельные сессии.
+state_dir="$root/.claude/state"
+mkdir -p "$state_dir" 2>/dev/null || true
+git rev-parse HEAD 2>/dev/null > "$state_dir/session-start-sha-$session_id" || true
 
 warnings=()
 
-# 1. Branch behind upstream
-if git fetch origin --quiet 2>/dev/null; then
+# 1. Ветка отстала от upstream.
+# fetch под timeout 10 и без интерактивных промптов — машины бывают за прокси,
+# старт сессии не должен виснуть.
+fetch_ok=false
+if command -v timeout >/dev/null 2>&1; then
+  GIT_TERMINAL_PROMPT=0 timeout 10 git fetch origin --quiet 2>/dev/null && fetch_ok=true
+else
+  GIT_TERMINAL_PROMPT=0 git fetch origin --quiet 2>/dev/null && fetch_ok=true
+fi
+if [ "$fetch_ok" = true ]; then
   upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
   if [ -n "$upstream" ]; then
     behind=$(git rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)
@@ -28,7 +48,7 @@ if git fetch origin --quiet 2>/dev/null; then
   fi
 fi
 
-# 2. Uncommitted changes
+# 2. Uncommitted changes.
 dirty=$(git status --porcelain 2>/dev/null | head -10)
 if [ -n "$dirty" ]; then
   count=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
@@ -36,7 +56,7 @@ if [ -n "$dirty" ]; then
 $dirty")
 fi
 
-# 3. gh active account vs remote owner mismatch
+# 3. Активный gh-аккаунт vs владелец remote.
 if command -v gh >/dev/null 2>&1; then
   gh_user=$(gh api user --jq .login 2>/dev/null || true)
   remote_url=$(git remote get-url origin 2>/dev/null || true)
@@ -49,12 +69,10 @@ if command -v gh >/dev/null 2>&1; then
 fi
 
 if [ ${#warnings[@]} -gt 0 ]; then
-  {
-    echo "[session-start hook]"
-    for w in "${warnings[@]}"; do
-      echo "  - $w"
-    done
-  } >&2
+  echo "[session-start hook]"
+  for w in "${warnings[@]}"; do
+    echo "  - $w"
+  done
 fi
 
 exit 0
