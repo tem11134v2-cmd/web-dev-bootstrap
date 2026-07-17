@@ -32,9 +32,13 @@ project/
 ├── lib/
 │   ├── utils.ts                # cn() и общие хелперы
 │   ├── consultation-context.tsx # Глобальный контекст модалки
-│   └── crm.ts                  # Клиент CRM (см. forms-and-crm.md)
+│   ├── rate-limit.ts           # In-memory rate limiter для форм
+│   ├── fallback.ts             # JSONL-fallback лидов (LEADS_DIR)
+│   └── sinks/                  # Каналы доставки лидов (см. forms-and-crm.md)
+│       ├── index.ts            # Оркестрация каналов + классификация результатов
+│       └── email.ts, sheets.ts, telegram.ts, crm.ts
 ├── public/                     # Статика
-├── data/                       # Fallback (leads.json)
+├── data/                       # Fallback-лиды локально (JSONL); на VPS — LEADS_DIR
 ├── docs/                       # KB (эти файлы)
 ├── specs/                      # Спецификации задач
 ├── scripts/                    # Серверные shell-скрипты (bootstrap-vps, sync-env, rollback)
@@ -59,6 +63,18 @@ project/
 - На билде Content Collections парсит `content/**/*.mdx`, валидирует frontmatter, компилирует MDX и кладёт результат в `.content-collections/generated`. В коде импортируется как `import { allPosts } from 'content-collections'` — типизированный массив с автокомплитом.
 - React-компоненты прямо в контенте через `<MDXContent code={post.mdx} components={{ Callout }} />`.
 - Опечатка в `@type` или невалидный `date` — TypeScript-ошибка / понятный лог на билде, не runtime-500.
+
+Почему Content Collections, а не `next-mdx-remote` (на эту таблицу ссылается spec 07):
+
+| Критерий | Content Collections | next-mdx-remote |
+|---|---|---|
+| Frontmatter | Zod-схема, валидация на билде | ручной `gray-matter`, `data: any` |
+| Типы | автогенерируются (`allPosts`) | пишешь и поддерживаешь сам |
+| Компиляция MDX | один раз на билде | на каждый рендер |
+| Ошибка в контенте | ломает билд | 500 на проде |
+| Dev-опыт | вотчер на `content/**` | нет |
+
+Contentlayer (популярная альтернатива) — deprecated; Content Collections — его действующий наследник.
 
 **Глобальные модалки через React Context.**
 - `ConsultationDialogProvider` в `app/layout.tsx`.
@@ -104,21 +120,27 @@ const pageData = { metaDescription: META_DESCRIPTION }; // одно место �
 
 При шаблонизации (`ServicePageTemplate`) — генерируй JSON-LD автоматически из `pageData`, не хардкодь JSON в каждом `page.tsx`.
 
-## Partial Prerendering (опционально)
+## Cache Components (Next 16, опционально)
 
-Next.js 16 позволяет на одной странице совместить **статичный shell, отрендеренный на билде** + **динамические дырки внутри `<Suspense>`, отрендеренные на запросе**. Полезно, когда страница на 90% статична (hero, описание услуги, FAQ), но есть один-два динамических блока — счётчик «осталось N мест», live-цена, A/B-вариант hero.
+Прежний Partial Prerendering эволюционировал в **Cache Components**: `experimental.ppr`, `export const experimental_ppr` и `experimental.useCache` из Next 16 **удалены** — не использовать. Вместо них один top-level флаг в `next.config.ts`:
+
+```ts
+const nextConfig: NextConfig = {
+  cacheComponents: true,
+}
+```
+
+С включённым флагом: статичный shell пререндерится на билде, динамические дырки живут внутри `<Suspense>` и рендерятся на запросе, кэшируемые функции/компоненты помечаются директивой `'use cache'` (+ `cacheTag()` / `cacheLife()` для инвалидации и TTL — см. `docs/performance.md`).
 
 ```typescript
-// app/[slug]/page.tsx
-export const experimental_ppr = true
-
-export default function Page() {
+// app/[slug]/page.tsx — статика вокруг, динамика в Suspense-дырке
+export default async function Page({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
   return (
     <>
       <PageHero />            {/* статика — на билде */}
-      <Description />         {/* статика — на билде */}
       <Suspense fallback={<SeatsCounterSkeleton />}>
-        <SeatsCounter slug="x" />  {/* динамика — на запросе */}
+        <SeatsCounter slug={slug} />  {/* динамика — на запросе */}
       </Suspense>
       <Faq />                 {/* статика — на билде */}
     </>
@@ -126,18 +148,11 @@ export default function Page() {
 }
 ```
 
-PPR включается в `next.config.ts` глобально как `experimental.ppr: 'incremental'`, конкретные роуты активируют через `export const experimental_ppr = true`. Без per-route активации страницы остаются обычными SSG/ISR — флаг `'incremental'` опт-ин, не глобальный.
+**В шаблоне по умолчанию ВЫКЛ.** Наши сайты почти целиком статичные — SSG покрывает всё. Включать осознанно, после стабилизации сайта, когда есть конкретный кейс:
+- виджет «забронировано N из M» / live-цена / счётчик акции;
+- статичная шапка + персонализированный блок (рекомендации по cookie).
 
-**Когда оправдано:**
-- Лендинги услуг с виджетом «забронировано N из M» / live-ценой / счётчиком акции.
-- Страницы со статичной шапкой и персонализированным блоком (рекомендации по cookie).
-
-**Когда не нужно:**
-- Полностью статичные страницы (большинство страниц лендинга) — стандартный SSG быстрее.
-- Полностью динамические (личный кабинет) — обычный SSR без PPR.
-- Если динамический блок ниже первого экрана — проще `dynamic({ ssr: false })`, без всей PPR-машинерии.
-
-PPR на момент Next.js 16 — `experimental`, поэтому по умолчанию в шаблоне выключен. Включай точечно в проектах, где есть конкретный кейс под него.
+Не нужно: полностью статичным страницам (SSG быстрее и проще) и полностью динамическим (обычный SSR). Если динамический блок ниже первого экрана — проще `dynamic({ ssr: false })`.
 
 ## Ссылки на смежные документы
 

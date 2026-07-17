@@ -2,132 +2,134 @@
 
 Что Claude Code делает за вас автоматически — и как это отключить, если мешает.
 
-## Хуки (`.claude/hooks/`)
+## Требования и принципы
 
-Хуки — shell-скрипты, которые Claude Code вызывает в определённые моменты сессии. Регистрируются в `.claude/settings.json`. Все пять хуков идемпотентны и быстры (< 1 c).
+- **jq обязателен.** Guard-хуки (`guard-rm.sh`, `before-push.sh`, `subagent-stop.sh`) без jq работают **fail-closed**: блокируют любую команду с сообщением «guard disabled: install jq». Это осознанно: сломанный guard не должен молча пропускать всё. Установка: `winget install jqlang.jq` / `brew install jq`.
+- **Windows-совместимость.** В `settings.json` все хуки зовутся явно через `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh"` — голый путь `.claude/hooks/x.sh` на Windows уходит в cmd.exe и не исполняется. Скрипты хуков должны быть с LF-переводами строк.
+- **Matcher `Bash|PowerShell`.** PreToolUse-хуки перехватывают команды обоих тулов — деструктивные команды PowerShell (`Remove-Item -Recurse -Force`) без этого шли мимо guard-ов.
+- **Состояние — в `.claude/state/`** (gitignored), не в `/tmp`: на Windows `/tmp` git-bash-а живёт своей жизнью, а файлы на `session_id` изолируют параллельные сессии.
+
+## Кто что видит (важно — не путать каналы)
+
+| Хук | Канал | Кто видит |
+|---|---|---|
+| SessionStart, stdout, exit 0 | попадает в контекст сессии | Claude |
+| PreToolUse, stderr, exit 2 | команда блокируется, текст возвращается Claude | Claude (и реагирует) |
+| Stop, JSON `{"systemMessage": "..."}` в stdout | показывается в UI | человек |
+| Любой хук, stderr при exit 0 | **никто** | — |
+
+Из этого следствие: информационные предупреждения SessionStart печатаются в **stdout**; напоминание Stop-хука — только через `systemMessage`. Утверждение «stderr виден как system-reminder» из прошлых версий — неправда.
+
+## Разрешения (`permissions.deny`)
+
+В `settings.json` запрещено чтение env-файлов с секретами:
+
+```json
+"deny": ["Read(./.env)", "Read(./.env.local)", "Read(./.env.development)",
+         "Read(./.env.production)", "Read(./.env.*.local)"]
+```
+
+Паттерны перечислены явно, а не глобом `Read(./.env.*)` — глоб зацепил бы и `.env.example`, который читать как раз нужно (в нём имена переменных без значений).
+
+## Хуки (`.claude/hooks/`)
 
 ### `session-start.sh` — SessionStart
 
-Запускается один раз при старте каждого нового чата. Информирует, **не блокирует** (всегда `exit 0`).
+Один раз при старте чата. Информирует, не блокирует (всегда `exit 0`), весь вывод — в stdout.
 
-Проверяет:
+1. Пишет текущий HEAD в `.claude/state/session-start-sha-<session_id>` (session_id — из stdin-JSON хука; без jq — fallback на `$PPID`). По нему stop-reminder ловит коммиты сессии.
+2. `git fetch origin` — под `timeout 10` и с `GIT_TERMINAL_PROMPT=0`: за прокси или без сети старт сессии не виснет. Если ветка отстала — «Branch X is behind Y by N commit(s). Suggest: git pull».
+3. Uncommitted changes — перечисляет.
+4. Активный gh-аккаунт vs владелец origin — при mismatch подсказывает `gh auth switch`.
 
-1. `git fetch origin` → если ветка отстаёт от upstream на N коммитов, печатает «Branch X is behind Y by N commit(s). Suggest: git pull».
-2. `git status --porcelain` → если есть uncommitted changes, перечисляет их.
-3. `gh api user --jq .login` vs owner из `git remote get-url origin` → mismatch = warning «Push will fail. Switch: gh auth switch -h github.com -u <owner>».
+### `guard-rm.sh` — PreToolUse (Bash|PowerShell)
 
-Вывод идёт в stderr с префиксом `[session-start hook]` — Claude видит как system-reminder и автоматически реагирует.
+Блокирует деструктивные команды (`exit 2`). Кавычки в команде снимаются до матчинга, флаги ловятся в любом порядке и форме (`-rf`, `-fr`, `-f -r`, `--recursive --force`):
 
-### `before-push.sh` — PreToolUse (matcher: Bash)
+- `rm` по опасной цели: `/`, `/*`, `~`, `$HOME` (в т.ч. в кавычках), `*`, `./*`
+- `git push --force` и `-f` (в т.ч. в связке флагов), `git push origin +main` (+refspec). **`--force-with-lease` разрешён** — это безопасная альтернатива
+- `git clean -fd`/`-fdx`, `git reset --hard`, `git checkout -- .`, `find ... -delete`
+- PowerShell: `Remove-Item -Recurse -Force` (и алиасы `rm`/`ri` с этими флагами), `rd /s`, `Clear-Content` на `.env`
 
-Запускается перед каждой Bash-командой. Если команда — это `git push`, `gh pr <verb>` или `gh repo <verb>`, проверяет: совпадает ли активный gh-аккаунт с владельцем remote-а. При mismatch — `exit 2` с сообщением, push блокируется.
+### `before-push.sh` — PreToolUse (Bash|PowerShell)
 
-Зачем: на Mac бывает залогинено несколько gh-аккаунтов одновременно (`alice`, `bob`). Без хука легко случайно push-нуть в чужой репо или получить отказ от GitHub без понятной причины.
+Срабатывает на `git push`, `gh pr <verb>`, `gh repo <verb>`:
 
-**Ограничение (важно):** `PreToolUse` хук перехватывает **только то, что Claude делает через Bash-tool** в активной сессии. Прямой `git push` пользователя в обычном терминале — мимо хука. Это страховка от ошибок Claude, **не** immutable защита репо. Полную защиту даёт branch protection, но она недоступна на private + free GitHub плане (см. `docs/troubleshooting.md`).
+1. **gh-аккаунт vs владелец remote** — при mismatch блок с подсказкой `gh auth switch -h github.com -u <owner>`. Страховка от push не в тот аккаунт при нескольких gh-логинах.
+2. **Гейт перед `git push`**: если в `package.json` есть скрипт `typecheck` — прогоняет `pnpm typecheck` (и `pnpm lint`, если есть), при провале блокирует push и показывает хвост ошибок. Обход осознанно: `SKIP_PUSH_GATE=1 git push ...` (хук ищет `SKIP_PUSH_GATE=1` в тексте команды и в окружении). В `settings.json` у хука `timeout: 300` — typecheck бывает небыстрым.
 
-### `guard-rm.sh` — PreToolUse (matcher: Bash)
+**Ограничение:** PreToolUse перехватывает только команды Claude в сессии. Ваш `git push` в обычном терминале идёт мимо. Полную защиту даёт branch protection (недоступна на private + free плане, см. `docs/troubleshooting.md`).
 
-Блокирует деструктивные команды:
-- `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf *`
-- `git push --force` (любой)
+### `subagent-stop.sh` — SubagentStop
 
-### `format.sh` — PostToolUse (matcher: Edit|Write|MultiEdit)
+Гейт оркестраторного режима (`docs/orchestration.md` § Гейты): срабатывает, когда субагент завершает работу. Если в корне проекта есть `package.json` со скриптом `typecheck` — прогоняет `pnpm typecheck` (и `pnpm lint`, если скрипт есть); провал → блок (`exit 2`) с хвостом ошибок — субагент чинит их до передачи отчёта оркестратору. Нет `package.json` или `pnpm` — тихий `exit 0` (bootstrap-репо, не-Node проект). Обход осознанно: `SKIP_SUBAGENT_GATE=1`. В `settings.json` у хука `timeout: 300`. Работает и в интерактиве — вне оркестрации субагентов просто нет, хук молчит.
 
-Запускает `biome check --write` на каждый изменённый `.ts/.tsx/.js/.jsx/.mjs/.cjs/.json/.md/.mdx/.css` файл. Молча, без вывода. Если Biome не установлен (нет `node_modules/.bin/biome`) — пропускает.
+### `format.sh` — PostToolUse (Edit|Write|MultiEdit)
+
+`biome check --write` на изменённый `.ts/.tsx/.js/.jsx/.mjs/.cjs/.json/.md/.mdx/.css`. Молча. Нет Biome или jq — пропускает (информационный хук, fail-closed не нужен).
 
 ### `stop-reminder.sh` — Stop
 
-Срабатывает после **каждого** ответа Claude'а. Без фильтра пользователь получал бы напоминание про `/handoff` после каждой реплики (спам). Фильтр сравнивает текущий `git rev-parse HEAD` с зафиксированным на `SessionStart` (запись в `/tmp/.claude-session-start-sha-$PPID`, `$PPID` изолирует параллельные Claude-инстансы):
+После **каждого** ответа Claude. Сравнивает HEAD с зафиксированным в `.claude/state/session-start-sha-<session_id>`:
 
-- Совпало → silent exit 0 (HEAD не двигался — коммитов не было).
-- HEAD сменился → печатает в stderr напоминание «В этой сессии были коммиты ($short_start → $short_current). Если уходишь надолго — `/handoff`».
+- Совпало → тишина (коммитов не было).
+- HEAD сдвинулся → `{"systemMessage": "В этой сессии были коммиты (a1b2c3 → d4e5f6). Если уходишь надолго — /handoff..."}` — человек видит это в UI.
 
-Никогда не блокирует (всегда `exit 0`). `session-start.sh` записывает sha в начале каждой сессии.
+Никогда не блокирует.
+
+### `test-hooks.sh` — штатная проверка «обвязка жива»
+
+Не хук, а smoke-тест обвязки: `bash .claude/hooks/test-hooks.sh`. Подаёт фикстурные JSON (опасные и безопасные команды, Bash и PowerShell) на stdin каждого хука и сверяет exit-коды; в конце сводка PASS/FAIL. Без jq ожидает fail-closed exit 2 от guard-хуков и помечает это PASS с предупреждением. Гонять: после правки хуков, на свежей машине, при подозрении «хуки молчат».
 
 ## Slash-команды (`.claude/commands/`)
 
-В отличие от хуков (вызываются автоматически), slash-команды вызывает **пользователь** в чате — это .md-файлы с заранее написанными инструкциями для Claude. Claude Code Desktop сканирует папку при старте сессии и предлагает их в auto-complete (когда печатаешь `/` в чате).
+В отличие от хуков, slash-команды вызывает **пользователь** — это .md-инструкции, Claude Code подхватывает их в auto-complete по `/`.
 
-В bootstrap'е три команды:
-
-| Команда | Когда вызывать | Что делает |
+| Команда | Когда | Что делает |
 |---|---|---|
-| **`/resume`** | В **начале** новой сессии (после `/clear` или нового чата) | Читает `.claude/memory/INDEX.md` и `project_state.md`, сверяется с git (uncommitted-изменения, последние коммиты), кратко резюмирует где остановились — и **ждёт ОК** перед работой. Если git и память разошлись — стопает, не действует сам. |
-| **`/handoff`** | В **конце** сессии — перед `/clear`, перед закрытием чата, особенно если уходишь надолго | Обновляет `.claude/memory/project_state.md`: добавляет запись в Session log (что сделано), пересобирает Active phase + Next steps, спрашивает про uncommitted-изменения (коммитить или сохранить как stash). |
-| **`/catchup`** | После долгого перерыва (несколько дней/недель), когда `/resume` дал короткое резюме, но хочется глубже понять что произошло | Глубже копает `git log`, последние PR, сравнивает с памятью. Полезно когда параллельно работали другие разработчики. |
+| **`/resume`** | В начале новой сессии | Читает память, сверяет с git, проверяет осиротевшие worktree/ветки `claude/*`, резюмирует — и ждёт ОК. При расхождении памяти и git — стоп. |
+| **`/handoff`** | В конце сессии | Пишет запись в Session log `project_state.md` (для оркестраторных сессий — в формате task ledger), обновляет Active phase / Next steps, спрашивает про uncommitted. |
+| **`/catchup`** | После долгого перерыва | Копает `git log` глубже, сравнивает с памятью. Полезно после параллельной работы других. |
+| **`/orchestrate`** | Крупный пласт: сайт целиком, rollout, recreate | План волны, батч-вопрос человеку, брифы субагентам, ledger. Правила — `docs/orchestration.md`. |
 
-Подробное содержимое команд — в `.claude/commands/{handoff,resume,catchup}.md`. Файлы можно править под свой проект — это обычные prompt-инструкции.
-
-Stop-reminder hook (см. выше) подталкивает к `/handoff` если в сессии были коммиты — мягкое напоминание, не блок.
+Sha сессии команды берут из `.claude/state/session-start-sha-*` (свежайший по mtime). Stop-reminder мягко подталкивает к `/handoff`, если были коммиты.
 
 ## Скрипты (`scripts/`)
 
-Скрипты — bash-утилиты, которые Claude (или вы) запускаете руками или по команде. Все: `set -euo pipefail`, идемпотентны, требуют подтверждения для деструктивных операций.
+Bash-утилиты, запускаются руками или по команде. Все: `set -euo pipefail`, идемпотентны, подтверждение `[y/N]` на всё чувствительное.
 
-### `scripts/sync-env.sh [site] [ssh_alias]` — **fallback**
+### `scripts/sync-env.sh [site] [ssh_alias]` — fallback
 
-В штатном flow `.env` на VPS пишет сам GitHub Actions workflow на каждом деплое — берёт содержимое из Environment-секрета `PROD_ENV_FILE` и кладёт в `releases/<sha>/.env` рядом с standalone-сборкой. Менять секреты — через `gh secret set --env production PROD_ENV_FILE < ~/projects/{site}/.env.production` или GitHub UI.
-
-`sync-env.sh` нужен только в трёх ситуациях:
-1. **Actions недоступны** (GitHub outage, сеть режет коннект к runners) — а сайт лежит, и надо подкинуть env прямо сейчас.
-2. **Env поменялся mid-cycle**, ждать следующего push в main не хочется — патчим текущий релиз руками, потом всё равно обновляем `PROD_ENV_FILE` секрет (иначе следующий деплой откатит правку).
-3. **Recovery после ручных правок на VPS** — выровнять env по локальному `.env.production` как источнику истины.
-
-Скрипт делает: scp `~/projects/{site}/.env.production` → `/home/deploy/prod/{site}/current/.env` (через симлинк, попадает в активный `releases/<sha>/.env`), `chmod 600`, `pm2 reload {site}-prod --update-env`. По дефолту site берётся из `package.json#name`, ssh_alias — `${site}` (т.е. в `~/.ssh/config` нужен `Host {site}`).
-
-Спрашивает подтверждение `[y/N]` перед scp. Сразу предупреждает, что следующий push в main перезапишет значение из `PROD_ENV_FILE` секрета.
+Штатно `.env` на VPS пишет GitHub Actions из Environment-секрета `PROD_ENV_FILE`. Скрипт нужен только когда: (1) Actions недоступны, а сайт лежит; (2) env поменялся mid-cycle и ждать push нельзя; (3) recovery после ручных правок на VPS. Делает scp `~/projects/{site}/.env.production` → `current/.env`, `chmod 600`, `pm2 restart {site}-prod --update-env`. Следующий push в main перезапишет значение из секрета — скрипт об этом предупреждает.
 
 ### `scripts/fetch-env.sh [site] [ssh_alias]` — для свежего устройства
 
-Зеркало `sync-env.sh` в обратную сторону: тянет активный `.env` с VPS в локальный `~/projects/{site}/.env.production`. Используется ровно один раз — когда настраиваешь свежее устройство (новый Mac, потерял ноут, второй компьютер) и нужен рабочий `.env.production` для локального prod-like запуска.
+Обратное зеркало: тянет активный `.env` с VPS в локальный `.env.production` (VPS — единственная актуальная plain-text копия: GitHub Secrets обратно не читаются, `.env.production` gitignored). Бэкапит существующий файл, `chmod 600`, в финале печатает только **имена** переменных.
 
-Зачем именно VPS как источник истины:
-- Actions на каждом push пишет `releases/<sha>/.env` из `PROD_ENV_FILE` Environment-секрета — это всегда самая свежая plain-text копия, какая существует. GitHub Secrets хранятся зашифрованными, прочитать обратно нельзя даже владельцу.
-- `.env.production` намеренно gitignored — серверные секреты (Turnstile secret, Sheets service account, Telegram bot token, CRM credentials) не попадают в git history.
+### `scripts/rollback.sh [site] [ssh_alias] [port]`
 
-Поведение:
-- Идемпотентно, `set -euo pipefail`.
-- Проверяет SSH-доступ ДО локальных правок (если упало — даёт понятную инструкцию: `ssh-copy-id deploy@<vps-ip>` или панель провайдера).
-- Существующий локальный `.env.production` бэкапится как `.env.production.bak.<timestamp>` перед перезаписью.
-- `chmod 600` на результат.
-- В финале печатает **имена** переменных (без значений) — чтобы видеть что пришло, не светя секреты в shell history.
+Реализация отката прода (основное описание — `docs/deploy.md` § «Откат прода»): атомарный switch симлинка `current` на предыдущий релиз (с проверкой `server.js` в нём), затем `pm2 delete {site}-prod` + `PORT={port} HOSTNAME=127.0.0.1 pm2 start current/server.js` + `pm2 save` + healthcheck. Секунды, без build. Порт — третьим аргументом или `PROD_PORT=...`; без него скрипт останавливается с подсказкой, где порт взять (`~/ports.md` на VPS, repo variable `PROD_PORT`, `references.md`). После отката обязательно `git revert <bad-commit> && git push` — иначе следующий деплой вернёт сломанный код.
 
-Спрашивает подтверждение `[y/N]` перед скачиванием. Сайт по дефолту берётся из `package.json#name`, ssh_alias — `${site}` (нужен `Host {site}` в `~/.ssh/config`).
+**Правило перезапуска PM2 — не путать два случая:**
 
-### `scripts/rollback.sh [site] [ssh_alias]`
-
-Откатывает прод на VPS на **предыдущий релиз** через атомарный switch симлинка `current → releases/<previous-sha>` + `pm2 reload`. Никакого git fetch, никакого pnpm install, никакого build — миллисекунды.
-
-Скрипт сам находит предыдущий sha (последний по mtime в `releases/`, исключая текущий) и переключает симлинк. Если в `releases/` лежит только один релиз — отказывается, отката нет.
-
-Спрашивает подтверждение `[y/N]`. Это **не** деструктивная операция (старые папки релизов остаются на месте, чистит их workflow по правилу last-5/last-3), но трогает прод-трафик — поэтому подтверждение обязательно.
-
-**После rollback** — обязательно на Mac: `git revert <bad-commit> && git push origin main`. Иначе следующий push в main соберёт и rsync-нет тот же сломанный коммит поверх отката.
+- **Сменился симлинк `current`** (деплой, rollback) → **только** `pm2 delete` + `pm2 start`: `restart`/`reload` кэширует resolved-путь симлинка и продолжает крутить старый релиз.
+- **Симлинк не менялся, патчился только env** (`sync-env.sh`) → достаточно `pm2 restart {site}-prod --update-env`; просто `restart` без `--update-env` env не перечитает.
 
 ### `scripts/bootstrap-vps.sh`
 
-Разовая настройка свежего Ubuntu VPS. См. `docs/server-manual-setup.md`. С v2.2 умеет пересоздавать swapfile, если его размер не совпадает с `SWAP_SIZE` (по дефолту 2G).
+Разовая настройка свежего Ubuntu VPS. См. `docs/server-manual-setup.md`.
 
 ## Как локально отключить хук
 
-Если хук мешает (отлаживаете что-то, нужно push-нуть в обход):
-
-```bash
-chmod -x .claude/hooks/before-push.sh
-# или удалить из .claude/settings.json и закоммитить .claude/settings.local.json (gitignored)
-```
-
-После — не забудьте вернуть `chmod +x` обратно.
-
-`session-start.sh` отключить можно так же. Имеет смысл если работаете offline и `git fetch` подвисает.
+Убрать регистрацию из `.claude/settings.json` (локально, не коммитить). Учтите: хуки из `settings.local.json` **добавляются** к хукам из `settings.json`, а не заменяют их — «переопределить» хук локальным файлом нельзя. `chmod -x` тоже не поможет: хуки зовутся через `bash file.sh`, exec-бит не проверяется.
 
 ## Как добавить новый хук
 
-1. Положите `.sh` в `.claude/hooks/`, `chmod +x`.
-2. Зарегистрируйте в `.claude/settings.json` под нужным trigger (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `Notification`).
-3. Для `PreToolUse` — обязательно `set -uo pipefail` и `exit 0` по умолчанию (не блокировать без причины).
-4. `bash -n` для синтаксической проверки. `shellcheck` если установлен.
-5. Документируйте здесь.
+1. Положите `.sh` в `.claude/hooks/` (LF, не CRLF).
+2. Зарегистрируйте в `.claude/settings.json`: команда — через `bash "$CLAUDE_PROJECT_DIR/..."`, для командных перехватов matcher `Bash|PowerShell`.
+3. Guard-хук → jq fail-closed (`exit 2` без jq); информационный → молчаливый пропуск и `exit 0` всегда.
+4. Помните про каналы видимости (таблица выше) — stderr при exit 0 не видит никто.
+5. `bash -n` для синтаксиса, кейсы — в `test-hooks.sh`, прогнать его целиком.
+6. Документируйте здесь.
 
 См. также: `docs/troubleshooting.md` про gh auth mismatch и другие частые косяки.
