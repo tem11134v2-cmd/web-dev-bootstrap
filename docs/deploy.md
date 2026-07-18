@@ -1,6 +1,6 @@
 # Deploy
 
-Push-based deploy: разработка на Mac → push в GitHub → GitHub-runner собирает standalone-артефакт → rsync на VPS в `releases/<sha>/` → атомарный switch симлинка `current/` → `pm2 reload`. На VPS нет ни git, ни pnpm, ни build toolchain — только Node runtime + Caddy + PM2.
+Push-based deploy: разработка на Mac → push в GitHub → GitHub-runner собирает standalone-артефакт → tar.gz по scp на VPS → распаковка в `releases/<sha>/` (с проверками до симлинка) → атомарный switch симлинка `current/` → `pm2 delete` + `pm2 start` → healthcheck (не 200 → автооткат симлинка). На VPS нет ни git, ни pnpm, ни build toolchain — только Node runtime + Caddy + PM2.
 
 ## Общая картина
 
@@ -15,16 +15,20 @@ Push-based deploy: разработка на Mac → push в GitHub → GitHub-r
                                                 ▼
                                   ┌──────────────────────────┐
                                   │ ubuntu-latest runner     │
+                                  │ один job build+deploy    │
                                   │ pnpm install --frozen   │
                                   │ pnpm build (standalone) │
-                                  │ pack: .next/standalone  │
-                                  │     + .next/static       │
-                                  │     + public/            │
+                                  │ pack: standalone+static │
+                                  │   +public → tar.gz      │
+                                  │   + gzip -t             │
                                   └──────┬───────────────────┘
-                                         │ rsync -az --delete (SSH)
+                                         │ scp release.tar.gz (SSH)
+                                         │ + gzip -t, распаковка,
+                                         │   чек server.js
                                          │ + write .env from secret
                                          │ + ln -sfn current
-                                         │ + pm2 reload
+                                         │ + pm2 delete && start
+                                         │ + healthcheck (fail→откат)
                                          ▼
                                   ┌──────────────────────────┐
                                   │ VPS (Node + Caddy + PM2) │
@@ -33,8 +37,9 @@ Push-based deploy: разработка на Mac → push в GitHub → GitHub-r
                                   │    releases/<sha-2>/     │
                                   │    releases/<sha-3>/  ←  │
                                   │    current ───────┘      │
+                                  │    shared/data (лиды)    │
                                   │       │                  │
-                                  │       ▼ pm2 reload       │
+                                  │       ▼ pm2 (PORT env)   │
                                   │   localhost:3010         │
                                   │       ▼                  │
                                   │     Caddy + ACME         │
@@ -45,7 +50,7 @@ Push-based deploy: разработка на Mac → push в GitHub → GitHub-r
 
 ## Структура релизов на VPS
 
-Push-based deploy кладёт каждый билд в `releases/<sha>/` и переключает симлинк `current` атомарно. Это даёт мгновенный rollback (`ln -sfn` обратно) и нулевой даунтайм при `pm2 reload`.
+Push-based deploy кладёт каждый билд в `releases/<sha>/` и переключает симлинк `current` атомарно. Это даёт мгновенный rollback (`ln -sfn` обратно) без пересборки. Это **единственное** полное описание структуры релизов в пакете — `server-add-site.md` ссылается сюда.
 
 ```
 /home/deploy/prod/{site}/
@@ -58,30 +63,26 @@ Push-based deploy кладёт каждый билд в `releases/<sha>/` и п�
 │       │   └── static/   (положен runner-ом рядом со standalone)
 │       ├── public/       (положен runner-ом рядом со standalone)
 │       └── .env          (записан workflow из PROD_ENV_FILE secret)
+├── shared/
+│   └── data/             fallback-лиды (JSONL, LEADS_DIR) — живёт МЕЖДУ релизами
 └── current → releases/c5d2a91…/
 ```
 
-- **Switch на новый релиз:** `ln -sfn releases/<new-sha> current && pm2 reload {site}-prod`. Атомарно, без перезапуска процесса с холодного старта.
-- **Rollback:** `scripts/rollback.sh` находит предыдущий sha, переключает симлинк обратно, делает `pm2 reload`. Без пересборки — миллисекунды.
-- **Cleanup:** workflow держит последние 5 релизов prod (3 для dev) — `ls -1tr releases | head -n -5 | xargs rm -rf`.
-- **Первый деплой:** до первого workflow в `~/prod/{site}/` есть только пустая папка `releases/`; `current` создаётся первым же успешным запуском, дальше PM2 живёт на `current/server.js`.
-
-Подробности по созданию папки и доступам — `docs/server-add-site.md`.
+- **Switch на новый релиз:** `ln -sfn releases/<new-sha> current`, затем `pm2 delete` + `pm2 start` (боевой урок: `pm2 restart`/`reload` кэширует resolved-путь симлинка и продолжает крутить старый релиз).
+- **Rollback:** переключить симлинк на предыдущий sha и так же перезапустить процесс — см. § «Откат прода» ниже.
+- **Cleanup:** workflow держит последние 5 релизов prod (3 для dev) — `ls -1tr releases | head -n -5 | xargs rm -rf`. **`shared/` деплой и cleanup не трогают** — лиды переживают любые релизы; в `.env` прописан абсолютный путь `LEADS_DIR=/home/deploy/prod/{site}/shared/data`, симлинк в релиз не нужен.
+- **Первый деплой:** до первого workflow в `~/prod/{site}/` есть только пустые `releases/` и `shared/data/`; `current` создаётся первым же успешным запуском, дальше PM2 живёт на `current/server.js`.
 
 ## Собственность
 
-- **Mac и локальная папка** — у разработчика.
-- **GitHub-репо** — владелец обычно заказчик; разработчик — collaborator. Для собственных проектов разработчик = владелец.
-- **VPS, домен, SSL** — заказчик (или разработчик для собственных).
-- При уходе разработчика: удалить его из GitHub collaborators + снять его SSH-ключ с VPS (если был) — всё продолжает работать. См. `specs/12-handoff.md`.
+- **Mac и локальная папка** — у разработчика. **GitHub-репо** — владелец обычно заказчик, разработчик — collaborator (для собственных проектов разработчик = владелец). **VPS, домен, SSL** — заказчик (или разработчик для собственных).
+- При уходе разработчика: удалить его из GitHub collaborators + снять его SSH-ключ с VPS — всё продолжает работать. См. `specs/12-handoff.md`.
 
 ## Ветки
 
-- `main` — прод. Пушим сюда **только через Pull Request** (protected branch).
+- `main` — прод. Пушим сюда **только через Pull Request** (protected branch); перед merge — проверь preview на `dev.domain.com` (если настроен).
 - `dev` — интеграционная ветка для preview. Разработчик пушит сюда напрямую.
 - Feature-ветки (`feat/*`, `fix/*`) — по желанию для крупных задач с PR в `dev`.
-
-Коммиты — на английском, по подзадачам (см. `docs/workflow.md`).
 
 ## Preview для заказчика
 
@@ -94,27 +95,25 @@ Push-based deploy кладёт каждый билд в `releases/<sha>/` и п�
 
 ## Как выглядит GitHub Actions
 
-Канонический шаблон workflow — `_BUILD/v3/templates/deploy-prod.yml.example`. Спека `01b-server-handoff` копирует его в `.github/workflows/deploy-prod.yml` без изменений (все per-site значения вынесены в Variables/Secrets).
+Канонический шаблон workflow — `_BUILD/templates/deploy-prod.yml.example`. Спека `01b-server-handoff` копирует его в `.github/workflows/deploy-prod.yml` без изменений (все per-site значения вынесены в Variables/Secrets).
 
-Структура двух job-ов:
+**Один job `build-and-deploy`** (runs-on: ubuntu-latest, environment: production). Разделение на два job-а через `upload-artifact`/`download-artifact` не используем — боевой урок: квота артефактов аккаунта забивается за несколько недель деплоев и роняет пайплайн.
 
-1. **`build`** (runs-on: ubuntu-latest):
-   - `pnpm install --frozen-lockfile`
-   - `pnpm build` — переменные `NEXT_PUBLIC_*` приходят из Repository/Environment secrets и попадают в standalone-сборку.
-   - Pack: `cp -r .next/standalone/. deploy/`, `cp -r .next/static deploy/.next/static`, `cp -r public deploy/public`.
-   - `actions/upload-artifact` под именем `app`.
+Шаги:
 
-2. **`deploy`** (needs: build, environment: production):
-   - `actions/download-artifact` `app` → `deploy/`.
-   - Setup SSH из `secrets.SSH_PRIVATE_KEY` (`ed25519`) + `ssh-keyscan` в `known_hosts`.
-   - `rsync -az --delete -e "ssh -i …" deploy/ deploy@VPS:releases/<github.sha>/`
-   - Write `.env` из `secrets.PROD_ENV_FILE` heredoc-ом в `releases/<sha>/.env`, `chmod 600`.
-   - `ln -sfn releases/<sha> current && pm2 reload {site}-prod --update-env` (при первом деплое — `pm2 start current/server.js`).
-   - Cleanup: `ls -1tr releases | head -n -5 | xargs rm -rf` (last 5 для prod, last 3 для dev).
+1. Checkout, `pnpm install --frozen-lockfile`.
+2. `pnpm build` — переменные `NEXT_PUBLIC_*` приходят из secrets GitHub Environment (`production`/`dev`) и запекаются в standalone-сборку.
+3. Pack: `cp -r .next/standalone/. deploy/`, `cp -r .next/static deploy/.next/static`, `cp -r public deploy/public`, затем `tar -czf release.tar.gz -C deploy .` + `gzip -t` — битый архив ловим ещё на runner-е.
+4. Setup SSH из `secrets.SSH_PRIVATE_KEY` (`ed25519`) + `ssh-keyscan` в `known_hosts`.
+5. Upload and unpack release: `scp release.tar.gz` на VPS во `/tmp/`, там `gzip -t` (архив мог побиться при передаче), распаковка в `releases/<github.sha>/` и проверка наличия `server.js` — всё **до** переключения симлинка; нет `server.js` → exit 1.
+6. Write `.env` из `secrets.PROD_ENV_FILE` heredoc-ом в `releases/<sha>/.env`, `chmod 600`.
+7. Активация: `ln -sfn releases/<sha> current`, затем `pm2 delete {site}-prod || true` и `PORT={port} HOSTNAME=127.0.0.1 pm2 start current/server.js --name {site}-prod`, `pm2 save`. `PORT`/`HOSTNAME=127.0.0.1` — env ОС при каждом старте (standalone `server.js` читает их из окружения процесса, не из `.env`); после смены симлинка — только `delete` + `start` (почему не `restart`/`reload` — § «Структура релизов» выше).
+8. Healthcheck: `curl -sI http://127.0.0.1:{port}` → не 200 → **автооткат**: симлинк возвращается на предыдущий релиз, процесс перезапускается (`delete` + `start`), workflow падает красным.
+9. Cleanup: `ls -1tr releases | head -n -5 | xargs rm -rf` (last 5 для prod, last 3 для dev). `shared/` не трогается.
 
-**Аналогичный `deploy-dev.yml`** — для ветки `dev`, environment `dev`, путь `~/dev/{site}/`.
+**Аналогичный `deploy-dev.yml`** (`_BUILD/templates/deploy-dev.yml.example`) — для ветки `dev`, environment `dev`, путь `~/dev/{site}/`.
 
-**`concurrency`** на per-site группе с `cancel-in-progress: false`: параллельные деплои встают в очередь, чтобы два rsync-а в одну `releases/<sha>/` не порвали артефакт.
+**`concurrency`** на per-site группе с `cancel-in-progress: false`: параллельные деплои встают в очередь, чтобы две выгрузки (scp + распаковка) в одну `releases/<sha>/` не порвали релиз.
 
 **Секреты и переменные GitHub:**
 
@@ -125,8 +124,9 @@ Push-based deploy кладёт каждый билд в `releases/<sha>/` и п�
 | Environment `production` (secret) | `SSH_USER` | `deploy`. |
 | Environment `production` (secret) | `SSH_PORT` | Кастомный SSH-порт (по дефолту `2222`). |
 | Environment `production` (secret) | `PROD_ENV_FILE` | Содержимое `.env.production` целиком (multiline). |
-| Repository (secret) | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_YM_ID`, `NEXT_PUBLIC_GA_ID` | Используются на билде в standalone-сборке (если применимо). |
+| Environment `production` / `dev` (secret) | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_YM_ID`, `NEXT_PUBLIC_GA_ID` | Используются на билде в standalone-сборке (если применимо). |
 | Repository (variable) | `SITE_NAME` | Имя сайта = имя PM2-процесса = `{site}` в путях VPS. |
+| Repository (variable) | `PROD_PORT` (и `DEV_PORT` для dev-workflow) | Порт из реестра `~/ports.md` на VPS; шаблоны yml подставляют `vars.PROD_PORT`/`vars.DEV_PORT` в `PORT=` на `pm2 start`. |
 
 Менять `PROD_ENV_FILE` после правки локального `.env.production`:
 ```bash
@@ -147,26 +147,22 @@ git push origin dev          # deploy-dev.yml → dev.domain.com
 # проверили, всё ок → PR dev → main → merge → deploy-prod.yml → domain.com
 ```
 
-Claude Desktop в это время:
-- работает с файлами в `~/projects/{site}`;
-- пушит через `git` / `gh` (не через SSH на сервер — туда он не ходит).
+Claude Desktop в это время работает с файлами в `~/projects/{site}` и пушит через `git` / `gh`. На VPS он ходит по SSH по канону `CLAUDE.md`: read-only проверки деплоя (`pm2 status`, `ls releases/`, `curl -I`), предупредив пользователя, что именно собирается сделать.
 
 ## Откат прода
 
-С Mac разработчика (НЕ заходя на VPS):
+Это основное описание отката (реализация скрипта — `docs/automation.md` § rollback). С Mac разработчика:
 
 ```bash
 cd ~/projects/{site}
-scripts/rollback.sh
+PROD_PORT={port} scripts/rollback.sh   # порт — repo variable PROD_PORT / ~/ports.md на VPS / references.md
 ```
 
-Скрипт переключает симлинк `~/prod/{site}/current` на предыдущий релиз (последний по mtime в `releases/`, исключая текущий) и делает `pm2 reload {site}-prod --update-env`. Атомарно, миллисекунды, без пересборки. См. `docs/automation.md` § rollback.
+Скрипт переключает симлинк `~/prod/{site}/current` на предыдущий релиз (последний по mtime в `releases/`, исключая текущий) и перезапускает процесс: `pm2 delete {site}-prod` + `PORT={port} HOSTNAME=127.0.0.1 pm2 start current/server.js --name {site}-prod` (`reload` после смены симлинка не годится — кэширует resolved-путь). Секунды, без пересборки.
 
 После — на Mac разработчик:
 ```bash
-git revert <bad-commit>
-# для merge-коммита — git revert -m 1 <hash>
-git push origin main
+git revert <bad-commit> && git push origin main   # для merge-коммита: git revert -m 1 <hash>
 ```
 Actions соберёт чистый релиз поверх. Откатанный релиз остаётся в `releases/<sha>/` пока его не подчистит cleanup-step (last-5/last-3).
 
@@ -174,10 +170,8 @@ Actions соберёт чистый релиз поверх. Откатанны�
 
 ## Git-дисциплина
 
-- **Никогда не пушим напрямую в `main`** — только через PR из `dev` (protected branch защищает).
-- **Не коммитим:** `.env*`, `data/leads.json`, `node_modules/`, сборки, логи. См. `.gitignore`.
-- Перед merge `dev → main` — проверь preview на `dev.domain.com` (если настроен).
-- Коммит-сообщения на английском, краткие, в настоящем времени (`fix: handle empty form`, не `fixed`).
+- **Не коммитим:** `.env*`, `data/`, `node_modules/`, сборки, логи. См. `.gitignore`.
+- Остальное (сообщения коммитов, ребейз после `gh pr merge`) — `docs/workflow.md` § Git-дисциплина; ветки — § «Ветки» выше.
 
 ## Связанные файлы
 
@@ -185,7 +179,6 @@ Actions соберёт чистый релиз поверх. Откатанны�
 - **Добавить сайт на готовый VPS** (делаешь ты, один раз на сайт): `docs/server-add-site.md`
 - **Как уживаются несколько сайтов:** `docs/server-multisite.md`
 - **Подключение домена:** `docs/domain-connect.md`
-- **Cloudflare** (опционально): секция ниже.
 - **Передача проекта заказчику:** `specs/12-handoff.md`.
 
 ## Cloudflare (опционально, поверх схемы)
@@ -196,10 +189,9 @@ Actions соберёт чистый релиз поверх. Откатанны�
 1. Делегируй NS домена на Cloudflare (через регистратора).
 2. SSL/TLS mode: **Full (strict)** — чтобы CF проверял Let's Encrypt-сертификат, выписанный Caddy.
 3. Always Use HTTPS: ON.
-4. Auto Minify (CSS/JS/HTML): OFF — Next уже делает.
-5. Brotli: ON.
-6. Caching → Browser Cache TTL: Respect Existing Headers.
-7. Page Rules для статики `*/_next/static/*` — Cache Everything, Edge TTL = 1 month.
+4. Brotli: ON.
+5. Caching → Browser Cache TTL: Respect Existing Headers.
+6. Cache Rules для статики `*/_next/static/*` — Cache Everything, Edge TTL = 1 month. (Page Rules и Auto Minify Cloudflare удалил в 2024 — если встречаешь их в чужих гайдах, это устаревшее.)
 
 **Подводные камни:**
 - **HTTP-01 challenge через Cloudflare proxy не работает** — CF перехватывает `/.well-known/acme-challenge/`. Чтобы Caddy мог выписать первый сертификат: временно выключи proxy (серое облачко = DNS only), дождись выпуска (`journalctl -u caddy | grep "certificate obtained"`), включи proxy обратно. Альтернатива — DNS-01 challenge через Caddy plugin для Cloudflare (`xcaddy build` с `caddy-dns/cloudflare`), но это отдельная сборка Caddy.

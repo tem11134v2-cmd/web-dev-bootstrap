@@ -7,7 +7,7 @@ description: Завершить сессию красиво — обновить
 1. Прочитай `.claude/memory/project_state.md`.
 
 2. Собери факты текущей сессии:
-   - `git log <session-start-sha>..HEAD --oneline` — какие коммиты сделаны (sha сессии лежит в `/tmp/.claude-session-start-sha`, если файла нет — использовать `git log @{1.hour.ago}..HEAD` как приближение).
+   - `git log <session-start-sha>..HEAD --oneline` — какие коммиты сделаны. Sha сессии лежит в `.claude/state/session-start-sha-*` — возьми свежайший по mtime: `ls -t .claude/state/session-start-sha-* 2>/dev/null | head -1`. Если файлов нет — использовать `git log @{1.hour.ago}..HEAD` как приближение.
    - `git status --porcelain` — есть ли uncommitted-изменения.
    - Проверь, какие файлы тронуты (`git diff --name-only <session-start-sha>..HEAD`).
 
@@ -31,6 +31,8 @@ description: Завершить сессию красиво — обновить
    ```
 
    Дату/время бери из `date +"%Y-%m-%d %H:%M"`.
+
+   Если сессия была **оркестраторной** (работали субагенты) — запись в Session log веди в формате task ledger: задача | агент/модель | статус | верификация | коммиты (см. секцию `## Task ledger` в `project_state.md`).
 
 4. Если есть uncommitted-изменения — спроси пользователя: коммитить как часть текущей задачи (атомарно, осмысленным сообщением) или сохранить как есть до следующей сессии. Действуй по ответу.
 

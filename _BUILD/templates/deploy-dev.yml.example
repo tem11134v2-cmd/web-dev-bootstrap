@@ -1,9 +1,12 @@
 # Шаблон GitHub Actions workflow для push-based deploy dev-поддомена.
 #
-# Аналогичен deploy-prod.yml.example, но:
+# Аналогичен deploy-prod.yml.example (те же принципы, упрощённо), но:
 #   - триггер на ветке dev, не main
 #   - окружение GitHub Environment "dev" (отдельные secrets от production)
 #   - папка на VPS /home/deploy/dev/{site}/, PM2-процесс {site}-dev
+#   - repository variable DEV_PORT (порт dev-инстанса из ~/ports.md)
+#   - healthcheck без отката симлинка (dev — не страшно, чинится следующим push)
+#   - cleanup держит last 3
 #   - basicauth + noindex настраиваются на уровне Caddy (см. docs/server-add-site.md)
 #
 # Использовать только если в docs/pages.md явно запрошен dev-поддомен (preview).
@@ -21,9 +24,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build standalone artifact (dev)
+  deploy:
+    name: Build and deploy (dev)
     runs-on: ubuntu-latest
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
@@ -43,9 +47,8 @@ jobs:
         run: pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: 1
-          # Для dev обычно используются те же NEXT_PUBLIC_* что и в prod, чтобы
-          # тестировать аналитику в реальной конфигурации. Если нужно изолировать
-          # счётчики — заведи отдельные NEXT_PUBLIC_*_DEV в environment "dev".
+          # Для dev обычно те же NEXT_PUBLIC_*, что и в prod. Если нужно
+          # изолировать счётчики — заведи отдельные значения в environment "dev".
           NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           NEXT_PUBLIC_YM_ID: ${{ secrets.NEXT_PUBLIC_YM_ID }}
           NEXT_PUBLIC_GA_ID: ${{ secrets.NEXT_PUBLIC_GA_ID }}
@@ -56,24 +59,8 @@ jobs:
           cp -r .next/standalone/. deploy/
           cp -r .next/static deploy/.next/static
           cp -r public deploy/public
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-dev
-          path: deploy
-          retention-days: 3
-          if-no-files-found: error
-
-  deploy:
-    name: Rsync to dev and switch symlink
-    needs: build
-    runs-on: ubuntu-latest
-    environment: dev
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: app-dev
-          path: deploy
+          tar -czf release.tar.gz -C deploy .
+          gzip -t release.tar.gz
 
       - name: Setup SSH
         run: |
@@ -83,14 +70,23 @@ jobs:
           ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} -H ${{ secrets.SSH_HOST }} \
             >> ~/.ssh/known_hosts
 
-      - name: Rsync to release dir
+      - name: Upload and unpack release
+        # gzip -t на VPS + проверка server.js ДО переключения симлинка.
         env:
           SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
           TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
-          RELEASE_DIR: /home/deploy/dev/${{ vars.SITE_NAME }}/releases/${{ github.sha }}
+          SITE_DIR: /home/deploy/dev/${{ vars.SITE_NAME }}
+          SHA: ${{ github.sha }}
         run: |
-          $SSH $TARGET "mkdir -p $RELEASE_DIR"
-          rsync -az --delete -e "$SSH" deploy/ $TARGET:$RELEASE_DIR/
+          scp -i ~/.ssh/id_ed25519 -P ${{ secrets.SSH_PORT || 22 }} \
+            release.tar.gz $TARGET:/tmp/release-dev-$SHA.tar.gz
+          $SSH $TARGET "set -e; \
+            gzip -t /tmp/release-dev-$SHA.tar.gz; \
+            mkdir -p $SITE_DIR/releases/$SHA $SITE_DIR/shared/data; \
+            tar -xzf /tmp/release-dev-$SHA.tar.gz -C $SITE_DIR/releases/$SHA; \
+            rm /tmp/release-dev-$SHA.tar.gz; \
+            test -f $SITE_DIR/releases/$SHA/server.js || \
+              { echo 'server.js отсутствует в релизе — стоп до симлинка'; exit 1; }"
 
       - name: Push .env from secrets
         env:
@@ -102,19 +98,29 @@ jobs:
           ${{ secrets.DEV_ENV_FILE }}
           EOF
 
-      - name: Activate release (atomic symlink switch)
+      - name: Activate release (symlink switch + pm2 + healthcheck)
+        # pm2 delete + start (не restart — кэширует resolved-путь симлинка).
+        # PORT и HOSTNAME=127.0.0.1 — в env pm2-команды.
         env:
           SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
           TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
-          SITE_DIR: /home/deploy/dev/${{ vars.SITE_NAME }}
-          SHA: ${{ github.sha }}
-          PM2_NAME: ${{ vars.SITE_NAME }}-dev
         run: |
-          $SSH $TARGET "set -e; \
-            ln -sfn $SITE_DIR/releases/$SHA $SITE_DIR/current; \
-            pm2 reload $PM2_NAME --update-env || \
-              pm2 start $SITE_DIR/current/server.js --name $PM2_NAME --update-env; \
-            pm2 save"
+          $SSH $TARGET \
+            SITE_DIR=/home/deploy/dev/${{ vars.SITE_NAME }} \
+            SHA=${{ github.sha }} \
+            PM2_NAME=${{ vars.SITE_NAME }}-dev \
+            PORT=${{ vars.DEV_PORT }} \
+            bash -s <<'EOF'
+          set -e
+          ln -sfn "$SITE_DIR/releases/$SHA" "$SITE_DIR/current"
+          pm2 delete "$PM2_NAME" 2>/dev/null || true
+          PORT=$PORT HOSTNAME=127.0.0.1 \
+            pm2 start "$SITE_DIR/current/server.js" --name "$PM2_NAME"
+          pm2 save
+          sleep 5
+          CODE=$(curl -sI -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || echo 000)
+          [ "$CODE" = "200" ] || { echo "Healthcheck: $CODE вместо 200"; exit 1; }
+          EOF
 
       - name: Cleanup old releases (keep last 3)
         env:

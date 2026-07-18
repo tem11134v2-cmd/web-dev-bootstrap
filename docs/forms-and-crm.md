@@ -1,341 +1,112 @@
 # Forms & Leads
 
-Архитектура форм, валидация, **multi-sink доставка лидов** (Sheets / Telegram / CRM), fallback, согласие на ПДн.
+Архитектура форм: валидация → Server Action → антиспам → **multi-sink доставка** (Email / Telegram / Sheets / CRM) → fallback. Здесь — ядро. Полные листинги каналов и чек-листы подключения — `docs/forms-sink-recipes.md` (читай только раздел подключаемого канала).
 
 ## Архитектура
 
-Лид параллельно уходит во **все настроенные** sinks. Каналы независимы: ошибка одного не ломает другие. Если ни один не принял — fallback в `data/leads.json`.
-
 ```
-[React Hook Form + Zod + <Turnstile /> + useActionState]
-        │  formAction(formData) → вызов Server Action напрямую
-        ▼
-[Server Action: app/actions/submit-lead.ts ('use server')]
-   ├─ Rate limit (1 req / 10s / IP)
-   ├─ Zod validate (FormData → object → schema.safeParse)
-   ├─ Turnstile verify (challenges.cloudflare.com/turnstile/v0/siteverify)
-   │      └─ fail → return { error: "Защита от спама не пройдена" }
-   └─ Promise.allSettled([
-   │     sendToSheets(data),       ← lib/sinks/sheets.ts
-   │     sendToTelegram(data),     ← lib/sinks/telegram.ts
-   │     sendToCRM(data),          ← lib/sinks/crm.ts (stub до подключения)
-   │  ])
-   │      ├─ хоть один success → лид сохранён, return { success: true }
-   │      ├─ все skipped (нет env) → appendFallback() + warn в логах
-   │      └─ все failed (env есть, но API упали) → appendFallback() + error в логах
-   └─ return { success: true }     ← пользователю ВСЕГДА success (даже если все каналы упали — fallback страхует)
+[Форма + useActionState + <Turnstile />] → <form action={formAction}> → [app/actions/submit-lead.ts ('use server')]
+   ├─ Honeypot (скрытое поле заполнено → молча return { success: true })
+   ├─ Rate limit (6 req / мин / IP)
+   ├─ Zod 4 validate → Turnstile verify (siteverify) → fail → return { error }
+   └─ Promise.allSettled([ sendToEmail, sendToTelegram, sendToSheets, sendToCRM ])
+          ├─ хоть один success → лид доставлен
+          ├─ все skipped (нет env) → appendFallback() + console.warn
+          └─ все failed (env есть, API упали) → appendFallback() + console.error
+   → пользователю ВСЕГДА { success: true } (fallback страхует)
 ```
 
 Принципы:
 
-- **Multi-sink через `Promise.allSettled`.** Каналы независимы, упавший Telegram не ломает Sheets. Все вызываются параллельно.
-- **Skip vs fail.** Если в `.env` нет ключей канала — он бросает `SinkSkipped` (не считается ошибкой, не идёт в fallback-логику). Если ключи есть, но API упал — это `failure` (логируется, идёт в fallback если других success нет).
-- **`data/leads.json` — последний рубеж**, не основной канал. Используется только когда ни один sink не принял лид. Файл gitignored, лежит на VPS в `releases/<sha>/data/leads.json`.
-- **Server Action вместо Route Handler** — формы вызывают `submitLead` напрямую через `useActionState`/`<form action={...}>`. Endpoint `/api/lead` не создаётся.
-- **Никаких ключей CRM/Sheets/Telegram в клиентском коде** — только в `process.env.*` внутри Server Action.
-- **Антиспам через Cloudflare Turnstile** — токен проверяется на сервере **до** sinks. Без валидного токена ничего никуда не идёт.
+- **Multi-sink через `Promise.allSettled`** — каналы независимы, вызываются параллельно.
+- **Skip vs fail.** Нет ключей в env → sink бросает `SinkSkipped` (не ошибка). Ключи есть, API упал → failure (лог + fallback, если других success нет).
+- **Server Action, не Route Handler.** Endpoint `/api/lead` не создаётся: меньше кода, `useActionState` типизирует ответ, `<form action>` работает без JS.
+- **Секреты только в `process.env.*` внутри Server Action** — никогда в клиентском коде.
+- **Turnstile verify ДО sinks** — бесплатный CAPTCHA-аналог Cloudflare, режим Managed — большинство посетителей проходит без интеракции; токен одноразовый (после submit — `reset()`). Заведение и тест-ключи — `forms-sink-recipes.md` § Turnstile.
+- **Honeypot** — скрытое поле `company`: люди его не видят, боты заполняют. Заполнено → молча «успех».
 
-## Структура `lib/sinks/`
+## Какой sink когда
+
+| Канал | Когда | Env |
+|---|---|---|
+| **Email** (nodemailer + SMTP Яндекса) | **Дефолт, подключается первым — в день запуска форм** | `SMTP_USER`, `SMTP_PASS`, `LEAD_EMAIL_TO` |
+| Telegram (голый fetch на Bot API) | Уведомления в чат команды «не пропустить заявку» | `TG_BOT_TOKEN`, `TG_CHAT_ID` |
+| Google Sheets | Заказчик хочет реестр лидов в таблице | `GOOGLE_SHEETS_*` |
+| AmoCRM / Bitrix24 | У заказчика есть CRM и процессы в ней | `AMO_CRM_*` / `BITRIX_WEBHOOK_URL` |
+
+## Структура `lib/`
 
 ```
 lib/
-├── crm.ts              ← УСТАРЕЛ (если есть из v3.0/v3.1) — переехало в lib/sinks/crm.ts
-├── fallback.ts         ← пишет в data/leads.json
-├── rate-limit.ts       ← in-memory rate-limit
+├── fallback.ts         ← JSONL-fallback в LEADS_DIR
+├── rate-limit.ts       ← in-memory, 6/мин/IP
 └── sinks/
-    ├── index.ts        ← экспортирует allSinks + типы + SinkSkipped + classifySinkResults
-    ├── sheets.ts       ← Google Sheets через googleapis
-    ├── telegram.ts     ← Telegram Bot через node-telegram-bot-api
-    └── crm.ts          ← stub-функция (бросает SinkSkipped) — заполняется когда подключаешь CRM
+    ├── index.ts        ← LeadData, SinkSkipped, allSinks, classifySinkResults
+    ├── email.ts        ← листинг: forms-sink-recipes.md § EMAIL
+    ├── telegram.ts     ← § TELEGRAM
+    ├── sheets.ts       ← § SHEETS
+    └── crm.ts          ← stub (SinkSkipped) до подключения CRM; § AMOCRM / § BITRIX24
 ```
 
 ### `lib/sinks/index.ts` — диспетчер
 
 ```typescript
-// lib/sinks/index.ts
-import { sendToSheets } from "./sheets";
+import { sendToEmail } from "./email";
 import { sendToTelegram } from "./telegram";
+import { sendToSheets } from "./sheets";
 import { sendToCRM } from "./crm";
 
-export type LeadData = {
-  name: string;
-  phone: string;
-  email?: string;
-  message?: string;
-  source: string;
-};
+export type LeadData = { name: string; phone: string; email?: string; message?: string; source: string };
 
 export class SinkSkipped extends Error {
-  constructor(reason: string) {
-    super(reason);
-    this.name = "SinkSkipped";
-  }
+  constructor(reason: string) { super(reason); this.name = "SinkSkipped"; }
 }
 
-export const allSinks = [sendToSheets, sendToTelegram, sendToCRM] as const;
+export const allSinks = [sendToEmail, sendToTelegram, sendToSheets, sendToCRM] as const;
 
-export type SinkResult = PromiseSettledResult<unknown>;
-
-export function classifySinkResults(results: SinkResult[]) {
+export function classifySinkResults(results: PromiseSettledResult<unknown>[]) {
   const successes = results.filter((r) => r.status === "fulfilled");
-  const skips = results.filter(
-    (r) => r.status === "rejected" && r.reason instanceof SinkSkipped,
-  );
-  const failures = results.filter(
-    (r) => r.status === "rejected" && !(r.reason instanceof SinkSkipped),
-  );
+  const skips = results.filter((r) => r.status === "rejected" && r.reason instanceof SinkSkipped);
+  const failures = results.filter((r) => r.status === "rejected" && !(r.reason instanceof SinkSkipped));
   return { successes, skips, failures };
 }
 ```
 
-### `lib/sinks/sheets.ts` — Google Sheets
+### `lib/rate-limit.ts` — 6 запросов в минуту с IP
 
 ```typescript
-// lib/sinks/sheets.ts
-import { google } from "googleapis";
-import { SinkSkipped, type LeadData } from "./index";
+// In-memory sliding window. Достаточно для single-instance PM2; при cluster-mode лимит нестрогий, но Turnstile + fallback страхуют.
+const hits = new Map<string, number[]>();
+const WINDOW_MS = 60_000, LIMIT = 6;
 
-export async function sendToSheets(data: LeadData): Promise<void> {
-  const email = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-  const key = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-
-  if (!email || !key || !spreadsheetId) {
-    throw new SinkSkipped("GOOGLE_SHEETS_NOT_CONFIGURED");
-  }
-
-  const auth = new google.auth.JWT({
-    email,
-    // private_key в env часто экранируется как "\\n" — возвращаем настоящие переносы строк
-    key: key.replace(/\\n/g, "\n"),
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
-
-  const sheets = google.sheets({ version: "v4", auth });
-  const tab = process.env.GOOGLE_SHEETS_TAB_NAME ?? "Leads";
-
-  // Имя листа в одинарных кавычках с экранированием: чтобы Google Sheets API
-  // принимал имена с пробелами и кириллицей ("Лиды", "Список заявок").
-  const escapedTab = `'${tab.replace(/'/g, "''")}'`;
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${escapedTab}!A:F`,
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS", // всегда вставлять новый ряд внизу, не затирать соседние данные
-    requestBody: {
-      values: [[
-        new Date().toISOString(),
-        data.name,
-        data.phone,
-        data.email ?? "",
-        data.message ?? "",
-        data.source,
-      ]],
-    },
-  });
-}
-```
-
-**Подготовка таблицы (один раз):**
-
-1. Google Cloud Console → Create Project → APIs & Services → Enable Google Sheets API.
-2. APIs & Services → Credentials → Create Credentials → **Service Account**. Скачать JSON-ключ.
-3. Открыть таблицу в Google Sheets → Share → добавить service-account-email из JSON как **Editor**. Без этого API вернёт 403.
-4. Из JSON-ключа в `.env`:
-   - `GOOGLE_SHEETS_CLIENT_EMAIL` = `client_email` поле JSON
-   - `GOOGLE_SHEETS_PRIVATE_KEY` = `private_key` поле JSON. **Важно:** оборачивай значение в **двойные кавычки** и оставляй литеральные `\n` — sink в runtime сделает `.replace(/\\n/g, "\n")`.
-
-   **Правильно:**
-   ```bash
-   GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
-   ```
-   Без двойных кавычек либо с одинарными — Next.js dotenv / heredoc-парсер `PROD_ENV_FILE` секрета на VPS обработают `\n` непредсказуемо, и Google API вернёт `error:0480006C:PEM routines::no start line` или `invalid_grant: Invalid JWT Signature`.
-
-5. `GOOGLE_SHEETS_SPREADSHEET_ID` — из URL таблицы: `docs.google.com/spreadsheets/d/<ВОТ-ЭТО>/edit`.
-6. (Опционально) `GOOGLE_SHEETS_TAB_NAME` — имя листа, дефолт `Leads`.
-
-В первой строке таблицы можно сделать заголовки: `Дата`, `Имя`, `Телефон`, `Email`, `Сообщение`, `Источник` — `valueInputOption: "USER_ENTERED"` будет писать данные в `A2:F2` и далее.
-
-### `lib/sinks/telegram.ts` — Telegram-бот
-
-```typescript
-// lib/sinks/telegram.ts
-import TelegramBot from "node-telegram-bot-api";
-import { SinkSkipped, type LeadData } from "./index";
-
-export async function sendToTelegram(data: LeadData): Promise<void> {
-  const token = process.env.TG_BOT_TOKEN;
-  const chatId = process.env.TG_CHAT_ID;
-
-  if (!token || !chatId) {
-    throw new SinkSkipped("TELEGRAM_NOT_CONFIGURED");
-  }
-
-  // Создаём bot inline на каждый вызов: {polling: false} — это просто обёртка
-  // над token, дешёвая (~µs). Module-level singleton не нужен и плохо себя ведёт
-  // в Next.js Server Actions при HMR / multi-worker PM2.
-  const bot = new TelegramBot(token, { polling: false });
-
-  const rawText = [
-    "<b>🆕 Новая заявка</b>",
-    `<b>Источник:</b> ${escapeHtml(data.source)}`,
-    `<b>Имя:</b> ${escapeHtml(data.name)}`,
-    `<b>Телефон:</b> ${escapeHtml(data.phone)}`,
-    data.email ? `<b>Email:</b> ${escapeHtml(data.email)}` : null,
-    data.message ? `<b>Сообщение:</b> ${escapeHtml(data.message)}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  // Telegram message limit: 4096 символов. Если очень длинный комментарий —
-  // обрезаем. Sheets/CRM получат полную версию через свои sinks.
-  const text = rawText.length > 4000 ? rawText.slice(0, 4000) + "\n\n<i>...сообщение обрезано</i>" : rawText;
-
-  await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[c]!));
-}
-```
-
-**Подготовка бота (один раз):**
-
-1. В Telegram написать `@BotFather` → `/newbot` → выбрать имя и username. Получить **HTTP API token** (`123456:AAEx...`) — это `TG_BOT_TOKEN`.
-2. Создать чат куда будут приходить лиды (личный чат с ботом, групповой чат с командой, или канал). Добавить бота в чат.
-3. Узнать `chat_id`:
-   - Личный чат: `@userinfobot` → пиши ему любое сообщение → он вернёт твой `chat_id` (число типа `123456789`).
-   - Групповой чат: добавь бота, отправь любое сообщение, открой `https://api.telegram.org/bot<TOKEN>/getUpdates` → найди `"chat":{"id": -100...}`. Минусовое число — это `chat_id` группы.
-   - Канал: бот должен быть админом канала. `chat_id` канала — `@channelusername` (если public) или числовой ID из getUpdates.
-4. В `.env`:
-   - `TG_BOT_TOKEN` = токен бота
-   - `TG_CHAT_ID` = ID чата (с минусом для групп)
-5. Тест локально: запусти `pnpm dev`, отправь тестовую форму, проверь что сообщение пришло в чат.
-
-### `lib/sinks/crm.ts` — stub до подключения
-
-```typescript
-// lib/sinks/crm.ts
-import { SinkSkipped, type LeadData } from "./index";
-
-/**
- * Подключение CRM. Пока заглушка — возвращает SinkSkipped, лид идёт только в Sheets/Telegram.
- *
- * Чтобы подключить:
- * 1. Выбрать CRM (AmoCRM / Bitrix24 / RetailCRM / etc.).
- * 2. Положить ключи в .env (например, AMO_CRM_URL, AMO_CRM_TOKEN).
- * 3. Заменить тело функции на реальный POST в API CRM (готовые шаблоны — ниже в этом docs).
- * 4. После заполнения функция перестанет бросать SinkSkipped, начнёт принимать лиды.
- */
-export async function sendToCRM(data: LeadData): Promise<void> {
-  throw new SinkSkipped("CRM_NOT_CONFIGURED");
-}
-```
-
-**Готовые шаблоны для CRM — в конце этого файла.** Когда придёт время — копируешь нужный шаблон в `lib/sinks/crm.ts`, добавляешь env-переменные, тестируешь.
-
-## Helpers — `lib/rate-limit.ts` и `lib/fallback.ts`
-
-Server Action импортирует две утилиты, которые **не sinks**, но критичны для надёжности воронки:
-
-- `rateLimit` — отсекает дребезг submit'ов с одного IP (в дополнение к Turnstile).
-- `appendFallback` — пишет лид в `data/leads.json` если все sinks не приняли (последний рубеж).
-
-Эти файлы создаются **вместе с `lib/sinks/`** в spec 09. Без них Server Action не скомпилируется — `Module not found: '@/lib/rate-limit'`.
-
-### `lib/rate-limit.ts`
-
-```typescript
-// lib/rate-limit.ts
-//
-// In-memory rate-limit per IP. Достаточно для single-instance PM2 (default
-// в bootstrap'е). При cluster-mode у каждого worker'а будет свой Map —
-// rate-limit станет нестрогим, но Turnstile + appendFallback всё равно
-// предотвратят утечку лидов; за реальной защитой нужен Redis или подобное.
-
-const hits = new Map<string, number>();
-
-/**
- * Минимальная пауза между submit'ами с одного IP. «1 в windowMs».
- *
- * @param ip — IP клиента (из x-forwarded-for header).
- * @param windowMs — длина окна в миллисекундах. Обычно 10_000 (10s).
- * @returns true если запрос разрешён, false если бить throttle.
- */
-export function rateLimit(ip: string, windowMs: number): boolean {
+export function rateLimit(ip: string): boolean {
   const now = Date.now();
-  const lastHit = hits.get(ip) ?? 0;
-
-  if (now - lastHit < windowMs) {
-    return false;
-  }
-
-  hits.set(ip, now);
-
-  // Cleanup старых записей при росте map'а (не блокировать процесс на каждом запросе)
-  if (hits.size > 1000) {
-    for (const [storedIp, timestamp] of hits) {
-      if (now - timestamp > windowMs * 10) {
-        hits.delete(storedIp);
-      }
-    }
-  }
-
+  const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
+  if (recent.length >= LIMIT) { hits.set(ip, recent); return false; }
+  recent.push(now); hits.set(ip, recent);
+  if (hits.size > 1000) for (const [k, v] of hits) if (v.every((t) => now - t >= WINDOW_MS)) hits.delete(k);
   return true;
 }
 ```
 
-Server Action вызывает `rateLimit(ip, 10_000)` — один submit в 10 секунд / IP. Если нужна более сложная логика (3 в минуту, sliding window), реализуй через `Map<ip, number[]>` с массивом timestamps; для лид-форм «1 в N секунд» обычно достаточно — реальную защиту даёт Turnstile.
-
-### `lib/fallback.ts`
+### `lib/fallback.ts` — JSONL в `LEADS_DIR`
 
 ```typescript
-// lib/fallback.ts
-//
-// Последний рубеж: если все sinks не приняли лид (упали или skipped),
-// сохраняем в data/leads.json. Файл gitignored (.env*-style правило в
-// .gitignore). После починки sinks-каналов можно вручную восстановить
-// потерянные лиды из этого файла.
-
 import { promises as fs } from "fs";
 import path from "path";
 import type { LeadData } from "./sinks";
 
-const FALLBACK_PATH = path.join(process.cwd(), "data", "leads.json");
-
-type FallbackEntry = LeadData & { savedAt: string };
+// LEADS_DIR: локально не задан → ./data; на VPS = /home/deploy/prod/{site}/shared/data (абсолютный путь ВНЕ releases/ — деплой её не трогает).
+const DIR = process.env.LEADS_DIR ?? path.join(process.cwd(), "data");
 
 export async function appendFallback(data: LeadData): Promise<void> {
-  const entry: FallbackEntry = { ...data, savedAt: new Date().toISOString() };
-
-  let existing: FallbackEntry[] = [];
-  try {
-    const text = await fs.readFile(FALLBACK_PATH, "utf-8");
-    existing = JSON.parse(text);
-    if (!Array.isArray(existing)) existing = [];
-  } catch {
-    // Файл ещё не создан — нормально для свежего проекта.
-  }
-
-  existing.push(entry);
-
-  await fs.mkdir(path.dirname(FALLBACK_PATH), { recursive: true });
-  await fs.writeFile(FALLBACK_PATH, JSON.stringify(existing, null, 2), "utf-8");
+  await fs.mkdir(DIR, { recursive: true });
+  const line = JSON.stringify({ ...data, savedAt: new Date().toISOString() });
+  await fs.appendFile(path.join(DIR, "leads.jsonl"), line + "\n", "utf-8");
 }
 ```
 
-Концепции:
-
-- **Read-modify-write не atomic** — при двух одновременных вызовах одна запись теоретически может потеряться. На лендингах с одним лидом в минуту это нерелевантно. Если случится бот-атака с 10+ одновременными прорывами Turnstile — пара лидов может пропасть из JSON, но они всё равно дошли в Sheets/Telegram (они попадают в JSON только если **все** sinks упали, что само по себе аномалия).
-- **`data/leads.json` — gitignored** через шаблон `.gitignore` bootstrap'а (`data/leads.json` строкой). Никогда не коммитится — там персональные данные клиентов.
-- **Чтение для восстановления:** `cat ~/prod/{site}/current/data/leads.json | jq` на VPS. Если сайт работает на свежем релизе — это файл с лидами после последнего деплоя; старые релизы хранятся в `releases/<sha>/data/leads.json`.
+- `appendFile` — одна строка на лид, без read-modify-write гонок; файл никогда не коммитится (в `.gitignore`: `data/` — там ПДн). Чтение на VPS: `ssh deploy@vps 'cat ~/prod/{site}/shared/data/leads.jsonl'`; перед декомиссией сервера — выгрузить (см. runbook, спека 12).
 
 ## Server Action
 
@@ -346,488 +117,88 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { rateLimit } from "@/lib/rate-limit";
 import { appendFallback } from "@/lib/fallback";
-import { allSinks, classifySinkResults, type LeadData } from "@/lib/sinks";
+import { allSinks, classifySinkResults } from "@/lib/sinks";
 
 const schema = z.object({
-  name: z.string().min(2),
-  phone: z.string().min(10),
-  email: z.string().email().optional(),
-  message: z.string().optional(),
-  source: z.string(),
-  consent: z.literal(true),
+  name: z.string().min(2).max(200),
+  phone: z.string().min(10).max(30),
+  email: z.email({ error: "Некорректный email" }).optional(),
+  message: z.string().max(3000).optional(),
+  source: z.string().max(100),
+  consent: z.literal(true, { error: "Требуется согласие" }),
   turnstileToken: z.string().min(1),
 });
 
 export type LeadState = { success: true } | { error: string } | null;
 
-export async function submitLead(
-  _prev: LeadState,
-  formData: FormData,
-): Promise<LeadState> {
+export async function submitLead(_prev: LeadState, formData: FormData): Promise<LeadState> {
+  if (formData.get("company")) return { success: true }; // honeypot
+
   const ip = (await headers()).get("x-forwarded-for") ?? "unknown";
-  if (!rateLimit(ip, 10_000)) {
-    return { error: "Слишком много запросов. Подождите минуту." };
-  }
+  if (!rateLimit(ip)) return { error: "Слишком много запросов. Подождите минуту." };
 
   const raw = Object.fromEntries(formData);
-  const parsed = schema.safeParse({
-    ...raw,
-    consent: raw.consent === "on" || raw.consent === "true",
-  });
-  if (!parsed.success) {
-    return { error: "Проверьте поля формы" };
-  }
+  const parsed = schema.safeParse({ ...raw, consent: raw.consent === "on" || raw.consent === "true", email: raw.email || undefined });
+  if (!parsed.success) return { error: "Проверьте поля формы" };
 
-  // Turnstile verify ДО sinks, иначе бот успеет насыпать в Sheets/Telegram если они приняли request.
-  const verify = await fetch(
-    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        secret: process.env.TURNSTILE_SECRET_KEY!,
-        response: parsed.data.turnstileToken,
-        remoteip: ip,
-      }),
-    },
-  );
-  const verifyResult = (await verify.json()) as { success: boolean };
-  if (!verifyResult.success) {
-    return { error: "Защита от спама не пройдена" };
-  }
-
-  // LeadData без turnstileToken/consent (это transport-поля, в sinks не нужны).
-  const leadData: LeadData = {
-    name: parsed.data.name,
-    phone: parsed.data.phone,
-    email: parsed.data.email,
-    message: parsed.data.message,
-    source: parsed.data.source,
-  };
-
-  // Параллельная доставка во все sinks.
-  const results = await Promise.allSettled(
-    allSinks.map((sink) => sink(leadData)),
-  );
-  const { successes, skips, failures } = classifySinkResults(results);
-
-  // Реальные ошибки в логи (попадут в pm2 logs / journalctl).
-  if (failures.length > 0) {
-    console.error(
-      "Lead sink failures:",
-      failures.map((f) => (f as PromiseRejectedResult).reason),
-    );
-  }
-
-  // Если ни один sink не принял лид — пишем в JSON fallback, чтобы не потерять.
-  if (successes.length === 0) {
-    await appendFallback(leadData);
-    if (failures.length === 0 && skips.length === allSinks.length) {
-      console.warn(
-        "All lead sinks are not configured. Set GOOGLE_SHEETS_*, TG_BOT_TOKEN, or AMO_CRM_* in .env to start receiving leads. " +
-          "Until then leads are saved only to data/leads.json.",
-      );
-    }
-  }
-
-  return { success: true };
-}
-```
-
-Поведение:
-
-- **Лиду всегда показываем `success: true`** — даже если все sinks упали, fallback страхует. Пугать пользователя лишний раз не нужно.
-- **Хоть один sink принял** → fallback не пишется (избегаем дублирования: лид уже в Sheets/Telegram, JSON-файл — для recovery, а не для архива).
-- **Все sinks skipped** (свежий проект, не подключал ничего) → console.warn даёт понятный сигнал в логах: «настрой sink или будешь читать `data/leads.json`».
-- **Канал упал API-ошибкой** → `console.error` с деталями. Видно через `ssh deploy@vps 'pm2 logs {site}-prod --lines 50'`.
-
-Почему Server Action, а не Route Handler:
-
-- **Меньше кода** — нет `NextRequest`/`NextResponse`, FormData → schema напрямую.
-- **Тип возвращаемого значения** виден на клиенте через `useActionState<LeadState, FormData>`.
-- **Прогрессивное улучшение** — `<form action={...}>` работает без JS.
-- **Один меньше публичный endpoint** — нет `/api/lead`, защищать от прямых POST не надо. Server Action доступен только из приложения через `next-action` header.
-
-## Клиентская часть
-
-```typescript
-// components/forms/ContactForm.tsx
-"use client";
-import { useActionState, useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { toast } from "sonner";
-import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
-import { submitLead, type LeadState } from "@/app/actions/submit-lead";
-
-const schema = z.object({
-  name: z.string().min(2, "Минимум 2 символа"),
-  phone: z.string().min(10, "Некорректный телефон"),
-  email: z.string().email("Некорректный email").optional(),
-  message: z.string().optional(),
-  consent: z.literal(true, { errorMap: () => ({ message: "Требуется согласие" }) }),
-});
-
-const turnstileRef = useRef<TurnstileInstance | null>(null);
-const [token, setToken] = useState<string>("");
-const [state, formAction, isPending] = useActionState<LeadState, FormData>(submitLead, null);
-
-const { register, formState: { errors } } = useForm({
-  resolver: zodResolver(schema),
-  mode: "onBlur",
-});
-
-// Реакция на результат Server Action
-useEffect(() => {
-  if (!state) return;
-  if (state.success) toast.success("Заявка отправлена!");
-  else if (state.error) toast.error(state.error);
-  // одноразовый токен — переполучаем для следующего submit
-  turnstileRef.current?.reset();
-  setToken("");
-}, [state]);
-
-// JSX:
-<form action={formAction}>
-  <input {...register("name")} name="name" />
-  <input {...register("phone")} name="phone" />
-  {/* ...остальные поля */}
-  <input type="hidden" name="source" value="contact-form" />
-  <input type="hidden" name="turnstileToken" value={token} />
-  <Turnstile
-    ref={turnstileRef}
-    siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
-    onSuccess={setToken}
-    options={{ theme: "light", size: "flexible" }}
-  />
-  <button type="submit" disabled={isPending || !token}>
-    {isPending ? "Отправляем..." : "Отправить"}
-  </button>
-</form>;
-```
-
-Клиент **не знает** про sinks. С его стороны — один Server Action `submitLead`. Multi-sink — внутренняя кухня сервера.
-
-## `.env` переменные
-
-```bash
-# Cloudflare Turnstile (антиспам)
-NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4AAAAAAAxxxxxxxxxxxx
-TURNSTILE_SECRET_KEY=0x4AAAAAAAyyyyyyyyyyyy
-
-# Sink: Google Sheets
-GOOGLE_SHEETS_CLIENT_EMAIL=service-account-name@project-id.iam.gserviceaccount.com
-GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
-GOOGLE_SHEETS_SPREADSHEET_ID=1AbCdEfGhIjKlMnOpQrStUvWxYz...
-GOOGLE_SHEETS_TAB_NAME=Leads          # опционально, default "Leads"
-
-# Sink: Telegram
-TG_BOT_TOKEN=123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TG_CHAT_ID=-1001234567890
-
-# Sink: CRM — AmoCRM (раскомментируй при подключении)
-# AMO_CRM_URL=https://yourdomain.amocrm.ru   # без / в конце; Kommo — .kommo.com
-# AMO_CRM_TOKEN=eyJ...                        # долгосрочный токен интеграции
-# AMO_CRM_PIPELINE_ID=                        # опц. — ID воронки (иначе дефолтная)
-# AMO_CRM_STATUS_ID=                          # опц. — ID этапа (иначе первый)
-```
-
-В `.env.example` — те же ключи без значений (этот файл коммитится в git как контракт):
-
-```bash
-NEXT_PUBLIC_TURNSTILE_SITE_KEY=
-TURNSTILE_SECRET_KEY=
-
-GOOGLE_SHEETS_CLIENT_EMAIL=
-GOOGLE_SHEETS_PRIVATE_KEY=
-GOOGLE_SHEETS_SPREADSHEET_ID=
-
-TG_BOT_TOKEN=
-TG_CHAT_ID=
-
-# CRM — AmoCRM (опционально; раскомментируй при подключении)
-# AMO_CRM_URL=
-# AMO_CRM_TOKEN=
-# AMO_CRM_PIPELINE_ID=
-# AMO_CRM_STATUS_ID=
-```
-
-`NEXT_PUBLIC_TURNSTILE_SITE_KEY` — единственное публичное (по дизайну Cloudflare). Все остальные — серверные, **никогда** не `NEXT_PUBLIC_`.
-
-## Постепенное подключение sinks
-
-Каналы можно включать **по очереди**: установил пакеты, добавил два-три env-переменные → сразу работает. Остальные продолжают быть `SinkSkipped`.
-
-Порядок типичный:
-
-1. **Sheets** — первое подключаешь. Заказчик видит лиды в реальном времени в табличке, может комментировать поля. Service-account-овый JSON получается за 5 минут.
-2. **Telegram** — вторая очередь. Уведомление в чат команды «новая заявка» — не пропустишь даже если Sheets никто не открывает.
-3. **CRM** — последняя, когда заказчик готов вкладываться в маршрутизацию лидов / автоматизацию воронки. До этого Sheets+Telegram отлично заменяет CRM для команды до 3-5 человек.
-
-В каждом проекте — свой набор. Лендинг для одного эксперта может иметь только Telegram. Энтерпрайз — только AmoCRM + бэкап в Sheets. Бутик-агентство — все три.
-
-## Как добавить новый sink (4 шаг)
-
-1. **Создать `lib/sinks/<name>.ts`** с экспортом `async function sendTo<Name>(data: LeadData): Promise<void>`. В начале — guard через `SinkSkipped` если ключи не настроены.
-2. **Добавить env-переменные** в `.env`, `.env.example`, и в GitHub Environment Secret `PROD_ENV_FILE` через `gh secret set`.
-3. **Зарегистрировать** в `lib/sinks/index.ts`:
-   ```typescript
-   import { sendToZapier } from "./zapier";
-   export const allSinks = [sendToSheets, sendToTelegram, sendToCRM, sendToZapier] as const;
-   ```
-4. **Тест локально** — `pnpm dev`, отправь форму, проверь канал и `pm2 logs`/`console`. Если канал не настроен ещё — должен молча skip без ошибок в UI.
-
-## CRM-интеграции (готовые шаблоны)
-
-Скопируй нужный шаблон в `lib/sinks/crm.ts` (заменив stub). Не забудь добавить env-переменные.
-
-### AmoCRM
-
-```typescript
-// lib/sinks/crm.ts
-import { SinkSkipped, type LeadData } from "./index";
-
-export async function sendToCRM(data: LeadData): Promise<void> {
-  const url = process.env.AMO_CRM_URL;     // https://yourdomain.amocrm.ru (без / в конце)
-  const token = process.env.AMO_CRM_TOKEN; // долгосрочный токен интеграции
-
-  if (!url || !token) {
-    throw new SinkSkipped("AMO_CRM_NOT_CONFIGURED");
-  }
-
-  // Опциональная маршрутизация. Не заданы — Amo кладёт сделку в первый этап
-  // главной воронки. Заданы — в конкретную воронку/этап (где взять ID — см.
-  // «Подготовка amoCRM (один раз)» ниже).
-  const pipelineId = process.env.AMO_CRM_PIPELINE_ID;
-  const statusId = process.env.AMO_CRM_STATUS_ID;
-
-  // Имя сделки включает обрезанный preview сообщения — менеджер в Amo сразу
-  // видит контекст без открытия сделки. Полное сообщение пишется в note ниже.
-  const messagePreview = data.message ? ` — ${data.message.slice(0, 60)}${data.message.length > 60 ? "..." : ""}` : "";
-
-  const lead: Record<string, unknown> = {
-    name: `Заявка с сайта: ${data.source}${messagePreview}`,
-    _embedded: {
-      contacts: [{
-        name: data.name,
-        custom_fields_values: [
-          { field_code: "PHONE", values: [{ value: data.phone, enum_code: "WORK" }] },
-          ...(data.email ? [{ field_code: "EMAIL", values: [{ value: data.email, enum_code: "WORK" }] }] : []),
-        ],
-      }],
-    },
-  };
-  if (pipelineId) lead.pipeline_id = Number(pipelineId);
-  if (statusId) lead.status_id = Number(statusId);
-
-  const res = await fetch(`${url}/api/v4/leads/complex`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify([lead]),
-  });
-
-  if (!res.ok) {
-    throw new Error(`AmoCRM ${res.status}: ${await res.text()}`);
-  }
-
-  // Полное сообщение — отдельной нотой к сделке (если есть). Не критично если
-  // упадёт — сделка уже создана.
-  // ВАЖНО: /leads/complex возвращает ПЛОСКИЙ массив [{ id, contact_id,
-  // request_id, merged }], а не { _embedded: { leads: [...] } }. ID сделки —
-  // это created[0].id.
-  if (data.message) {
-    const created = (await res.json()) as Array<{ id: number }>;
-    const leadId = created[0]?.id;
-    if (leadId) {
-      await fetch(`${url}/api/v4/leads/${leadId}/notes`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify([{ note_type: "common", params: { text: data.message } }]),
-      }).catch(() => {/* нота не критична — игнорируем */});
-    }
-  }
-}
-```
-
-**Подготовка amoCRM (один раз):**
-
-amoCRM не требует OAuth-танца с refresh-токенами — для server-to-server берём **долгосрочный токен** (живёт от 1 дня до 5 лет, срок задаёшь сам). Это ровно то, что нужно нашему stateless-деплою (PM2 без БД): токен лежит в `.env`, ротации не требует.
-
-1. amoCRM → открыть **amoMarket** (в новых аккаунтах; в старых — **Настройки → Интеграции**) → **«+ Создать интеграцию»** → **«Внешняя интеграция»**. Указать ссылку на сайт (нужна при создании), права доступа — «Всё» (или минимум: сделки + контакты на запись).
-2. Открыть созданную интеграцию → вкладка **«Ключи и доступы»** → раздел **«Долгосрочный токен»** → **«Сгенерировать токен»** → выбрать срок (ставь максимум — 5 лет) → **«Подтвердить»** → скопировать. Это `AMO_CRM_TOKEN`.
-3. `AMO_CRM_URL` — адрес аккаунта целиком: `https://yourdomain.amocrm.ru` (международный Kommo — `https://yourdomain.kommo.com`). **Без** слэша в конце.
-4. (Опционально) маршрутизация в воронку/этап:
-   - `AMO_CRM_PIPELINE_ID` — ID воронки, `AMO_CRM_STATUS_ID` — ID этапа.
-   - Где взять: amoCRM → **Сделки → Настроить** (шестерёнка воронки) — ID воронки и этапов видны в URL/настройках. Программно — `GET {AMO_CRM_URL}/api/v4/leads/pipelines` с тем же Bearer-токеном.
-   - Не задал — лид падает в первый этап главной воронки (для большинства лендингов достаточно).
-5. Тест локально: `pnpm dev`, отправь форму → в amoCRM появляется новая **сделка** с контактом (имя/телефон/email) и примечанием с текстом сообщения.
-
-> **Безопасность.** Долгосрочный токен = доступ к аккаунту по выбранным правам. Хранить только в `.env` / GitHub-секрете `PROD_ENV_FILE`, **никогда** в git и не в `NEXT_PUBLIC_*`. Утёк — отозвать в той же вкладке «Ключи и доступы» и сгенерировать новый.
-
-### Bitrix24 (вебхук)
-
-```typescript
-// lib/sinks/crm.ts
-import { SinkSkipped, type LeadData } from "./index";
-
-export async function sendToCRM(data: LeadData): Promise<void> {
-  const hook = process.env.BITRIX_WEBHOOK_URL;
-  // https://yourdomain.bitrix24.ru/rest/USER_ID/WEBHOOK_KEY/
-
-  if (!hook) {
-    throw new SinkSkipped("BITRIX_NOT_CONFIGURED");
-  }
-
-  const params = new URLSearchParams({
-    "fields[TITLE]": `Заявка: ${data.source}`,
-    "fields[NAME]": data.name,
-    "fields[PHONE][0][VALUE]": data.phone,
-    "fields[PHONE][0][VALUE_TYPE]": "WORK",
-    "fields[SOURCE_ID]": "WEB",
-  });
-  if (data.email) params.append("fields[EMAIL][0][VALUE]", data.email);
-  // Пустой COMMENTS не отправляем — Bitrix может выкинуть warning или сохранить
-  // лид с пустым полем "комментарий", которое потом мешает менеджеру в фильтрах.
-  if (data.message) params.append("fields[COMMENTS]", data.message);
-
-  // POST с body вместо GET с query string: длинные комментарии (>2KB) могут
-  // упереться в URL-лимит у proxy. POST такого ограничения не имеет.
-  const res = await fetch(`${hook}crm.lead.add.json`, {
+  // Turnstile verify ДО sinks
+  const verify = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params,
+    body: new URLSearchParams({ secret: process.env.TURNSTILE_SECRET_KEY!, response: parsed.data.turnstileToken, remoteip: ip }),
   });
-  if (!res.ok) {
-    throw new Error(`Bitrix ${res.status}: ${await res.text()}`);
+  if (!((await verify.json()) as { success: boolean }).success) return { error: "Защита от спама не пройдена" };
+
+  const { turnstileToken: _t, consent: _c, ...leadData } = parsed.data;
+  const results = await Promise.allSettled(allSinks.map((sink) => sink(leadData)));
+  const { successes, skips, failures } = classifySinkResults(results);
+
+  if (failures.length > 0) console.error("Lead sink failures:", failures.map((f) => (f as PromiseRejectedResult).reason));
+  if (successes.length === 0) {
+    await appendFallback(leadData);
+    if (skips.length === allSinks.length) console.warn("All lead sinks are not configured — leads go to LEADS_DIR/leads.jsonl only.");
   }
+  return { success: true }; // пользователю всегда success — fallback страхует
 }
 ```
 
-### YClients, RetailCRM, кастомный
+## Клиентская часть (суть)
 
-Похожие паттерны: REST POST с `Authorization` header или вебхук-URL. Ключ всегда в `.env`. При интеграции — сохрани соответствие полей в `lib/sinks/crm.ts` (или раздели на несколько `lib/sinks/<crm-name>.ts` если нужно несколько CRM одновременно — тогда добавь их все в `allSinks`).
+RHF — только inline-валидация полей (`mode: 'onBlur'`), submit обрабатывает Server Action.
 
-## Антиспам — Cloudflare Turnstile
-
-Turnstile — бесплатный CAPTCHA-аналог от Cloudflare. По умолчанию **invisible** (без UX-трения), при подозрительном трафике сам показывает managed-чекбокс. Без VPN-блокировок (в отличие от reCAPTCHA), без вендор-лока на Google.
-
-### Заведение виджета
-
-1. Cloudflare Dashboard → **Turnstile** → **Add Site**.
-2. Domain: production-домен сайта + `localhost` (для локальной разработки).
-3. Widget Mode: **Managed** (рекомендуется — Cloudflare сам решает invisible/checkbox по риск-скору).
-4. Скопировать **Site Key** (публичный) и **Secret Key** (серверный).
-5. Если у заказчика уже есть Cloudflare-аккаунт под DNS/proxy — добавляй Turnstile-сайт там же. Если нет — отдельная регистрация (бесплатно).
-
-### Клиент — `@marsidev/react-turnstile`
-
-```bash
-pnpm add @marsidev/react-turnstile
-```
-
-Обёртка над официальным Turnstile JS API: ленивая загрузка скрипта, ref для `reset()`, колбэки `onSuccess`/`onError`/`onExpire`. Полный пример — выше в разделе «Клиентская часть».
-
-Ключевые моменты:
-
-- Токен **одноразовый** — после успешного submit вызови `turnstileRef.current?.reset()` и обнули локальный state. Иначе следующий submit отправит тот же токен → 400 от Cloudflare.
-- `siteKey` читай из `process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY`.
-- На submit-кнопке проверь `if (!token) return` — без токена не идём на сервер вообще.
-
-### Локальная разработка без виджета
-
-Cloudflare предоставляет тестовые ключи (https://developers.cloudflare.com/turnstile/troubleshooting/testing/):
-
-- Site key `1x00000000000000000000AA` — всегда проходит на клиенте.
-- Secret key `1x0000000000000000000000000000000AA` — всегда возвращает `success: true` на сервере.
-
-Полезно в `.env.local` пока не получили боевые ключи или в e2e-тестах.
-
-## `useOptimistic` для UX-без-задержки (опционально)
-
-Для **многошаговых сценариев** (квиз, мастер-настройки, чат поддержки) — пока Server Action летит, можно сразу показать предположительный итог через `useOptimistic`, а потом откатить если ошибка.
-
-```typescript
+```tsx
 "use client";
-import { useOptimistic } from "react";
+const [state, formAction, isPending] = useActionState<LeadState, FormData>(submitLead, null);
+// useEffect(state): success → toast.success + turnstileRef.current?.reset() + setToken(""); error → toast.error
 
-const [optimisticAnswers, addOptimistic] = useOptimistic(
-  answers,
-  (state, newAnswer: { stepId: string; value: string }) => [...state, newAnswer]
-);
-
-async function next(stepId: string, value: string) {
-  addOptimistic({ stepId, value }); // UI обновился мгновенно
-  const result = await saveAnswer(stepId, value); // Server Action
-  if (result?.error) toast.error(result.error);
-}
+<form action={formAction}>
+  <input {...register("name")} name="name" />  {/* + phone и остальные поля */}
+  {/* honeypot: вне вкладки и скринридера; класс НЕ "adv*" — режется адблоками */}
+  <input name="company" tabIndex={-1} autoComplete="off" aria-hidden="true" className="absolute -left-[9999px]" />
+  <input type="hidden" name="source" value="contact-form" />
+  <input type="hidden" name="turnstileToken" value={token} />
+  <Turnstile ref={turnstileRef} siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!} onSuccess={setToken} />
+  <label><Checkbox name="consent" required /> Согласен на <a href="/consent/">обработку ПДн</a></label>
+  <button type="submit" disabled={isPending || !token}>{isPending ? "Отправляем..." : "Отправить"}</button>
+</form>
 ```
 
-**Для лид-формы `useOptimistic` обычно не нужен.** `isPending` из `useActionState` показывает спиннер на кнопке — этого достаточно. `useOptimistic` оправдан там, где есть **осмысленный откат** (toast «не удалось сохранить»), не как украшательство.
+Клиент не знает про sinks — это внутренняя кухня сервера. Toast — Sonner. Глобальная модалка консультации — context-паттерн, см. `docs/architecture.md` § Server/Client разделение (CTA-кнопку извлекай в свой client-компонент).
 
-## Глобальная модалка консультации
+## Обязательные блоки формы (152-ФЗ)
 
-```typescript
-// lib/consultation-context.tsx
-"use client";
-const ConsultationContext = createContext<{ open: boolean; setOpen: (v: boolean) => void }>(
-  { open: false, setOpen: () => {} }
-);
+1. Чекбокс согласия со ссылкой на `/consent/` (согласие на обработку ПДн).
+2. Ссылка на `/privacy/` (политика конфиденциальности) рядом с submit.
+3. Cookie-баннер на сайте (выбор в `localStorage`).
 
-export const useConsultationDialog = () => useContext(ConsultationContext);
-
-// app/layout.tsx — оборачиваем всё приложение
-<ConsultationDialogProvider>
-  {children}
-  <ConsultationDialog />  {/* сама модалка с формой */}
-</ConsultationDialogProvider>
-
-// Любой CTA на сайте — внутри маленького client-компонента:
-const { setOpen } = useConsultationDialog();
-<Button onClick={() => setOpen(true)}>Записаться</Button>
-```
-
-> Извлекай CTA-кнопку в свой client-компонент (`ConsultationButton`), не делай контейнер целиком client. См. `docs/architecture.md` § Server/Client разделение.
-
-## Уведомления
-
-- **Sonner** для toast.
-- Успех: зелёный «Заявка отправлена».
-- Ошибка: красный с конкретным текстом.
-- Loading state на кнопке (`disabled` + spinner) во время `isPending`.
-
-## Обязательные блоки в любой форме на RU-сайте
-
-1. Чекбокс «Я согласен на обработку персональных данных» с ссылкой на «Согласие на обработку ПДн».
-2. Ссылка на «Политику конфиденциальности» рядом с кнопкой submit.
-3. Cookie-баннер на сайте (один раз показывается, сохраняется выбор в `localStorage`).
-
-Готовые тексты — `docs/legal-templates.md`.
+Тексты и канон страниц (`/privacy/`, `/consent/`, `/offer/` — только при оплате; внутренние ссылки — с trailing slash) — `docs/legal-templates.md`.
 
 ## Мониторинг лидов в проде
 
-Если вдруг лиды перестали приходить — checklist:
-
 ```bash
-# 1. Sinks: проверить логи Server Action на VPS
-ssh deploy@{vps-ip} "pm2 logs {site}-prod --lines 100" | grep -i "sink\|lead"
-
-# 2. Fallback: посмотреть data/leads.json — если он растёт, значит все sinks падают
-ssh deploy@{vps-ip} "tail ~/prod/{site}/current/data/leads.json"
-
-# 3. Каждый канал — проверить независимо:
-#    - Sheets: открой таблицу, есть ли свежие строки?
-#    - Telegram: открой чат с ботом, приходят ли сообщения?
-#    - CRM: интерфейс CRM, новые лиды?
-
-# 4. Turnstile: посмотреть статистику в Cloudflare Dashboard → Turnstile.
-#    Резкий рост блокировок = бот-атака; резкий рост legitimate = всё ок.
+ssh deploy@{vps-ip} "pm2 logs {site}-prod --lines 100" | grep -i "sink\|lead"   # ошибки sinks
+ssh deploy@{vps-ip} "tail ~/prod/{site}/shared/data/leads.jsonl"                # fallback растёт → все sinks падают
+# каждый канал проверить независимо: ящик / чат / таблица / CRM; Turnstile-статистика — Cloudflare Dashboard → Turnstile
 ```
 
-Если **один канал** упал — нормально, лид всё равно ушёл в другие. Если **все упали** — `data/leads.json` страхует, после починки можно ручным скриптом добить лиды в Sheets из JSON.
+Один канал упал — нормально, лид ушёл в другие. Все упали — `leads.jsonl` страхует, после починки добить лиды в каналы вручную.

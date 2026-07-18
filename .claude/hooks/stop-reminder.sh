@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
-# Stop hook: reminds to update .claude/memory/project_state.md if commits were made this session.
-# Stop event fires at the end of EVERY Claude response — without the sha-diff filter,
-# the user would see the reminder after every reply (spam). Filter ensures it shows
-# only when HEAD actually moved compared to session start.
+# Stop hook: напоминает обновить .claude/memory/project_state.md, если в сессии были коммиты.
+# Stop срабатывает после КАЖДОГО ответа Claude — без sha-фильтра напоминание
+# сыпалось бы после каждой реплики. Фильтр: HEAD сейчас vs HEAD на SessionStart.
 #
-# Never blocks (exit 0 always). Prints reminder to stderr so Claude sees it.
+# ВАЖНО: у Stop-хука stdout/stderr при exit 0 не показываются никому.
+# Единственный видимый канал — JSON с полем systemMessage в stdout
+# (его видит человек в UI). Никогда не блокирует (всегда exit 0).
 
 set -uo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+# session_id — из stdin-JSON хука; fallback на PPID (тот же, что в session-start.sh).
+input=$(cat 2>/dev/null || true)
+session_id=""
+if command -v jq >/dev/null 2>&1; then
+  session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)
+fi
+[ -z "$session_id" ] && session_id="$PPID"
+
+root="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$root" || exit 0
 
-# Skip if not a git repo.
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
-session_start_file="/tmp/.claude-session-start-sha-$PPID"
+session_start_file="$root/.claude/state/session-start-sha-$session_id"
 [ -f "$session_start_file" ] || exit 0
 
 session_start_sha=$(cat "$session_start_file" 2>/dev/null || echo "")
@@ -23,11 +31,12 @@ current_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ -n "$session_start_sha" ] && [ -n "$current_sha" ] && [ "$session_start_sha" != "$current_sha" ]; then
   short_start=$(git rev-parse --short "$session_start_sha" 2>/dev/null || echo "$session_start_sha")
   short_current=$(git rev-parse --short "$current_sha" 2>/dev/null || echo "$current_sha")
-  {
-    echo "[stop-reminder]"
-    echo "  В этой сессии были коммиты ($short_start → $short_current)."
-    echo "  Если уходишь надолго — /handoff, чтобы обновить .claude/memory/project_state.md."
-  } >&2
+  msg="В этой сессии были коммиты ($short_start → $short_current). Если уходишь надолго — /handoff, чтобы обновить .claude/memory/project_state.md."
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg msg "$msg" '{systemMessage: $msg}'
+  else
+    printf '{"systemMessage": "%s"}\n' "$msg"
+  fi
 fi
 
 exit 0

@@ -1,0 +1,168 @@
+# Шаблон GitHub Actions workflow для push-based deploy production.
+#
+# Куда положить: .github/workflows/deploy-prod.yml в корне сайта (после спеки 01b).
+# Что меняется per-site: vars.SITE_NAME (имя сайта = имя PM2-процесса),
+#                        vars.PROD_PORT (порт из реестра ~/ports.md на VPS).
+#
+# Что нужно настроить ПЕРЕД первым push (см. deploy/README.md):
+#   1. GitHub Environment "production" с required reviewers (опционально, чтобы
+#      деплой требовал одобрения).
+#   2. Secrets в environment "production":
+#        SSH_PRIVATE_KEY  — приватный ключ ed25519 (single-purpose deploy key,
+#                           публичная часть в /home/deploy/.ssh/authorized_keys на VPS)
+#        SSH_HOST         — IP VPS
+#        SSH_USER         — deploy
+#        SSH_PORT         — 2222 (или 22, если кастомный порт не настраивался)
+#        PROD_ENV_FILE    — содержимое .env.production целиком (multiline secret)
+#      Опционально (если используются на билде):
+#        NEXT_PUBLIC_TURNSTILE_SITE_KEY
+#        NEXT_PUBLIC_YM_ID
+#        NEXT_PUBLIC_GA_ID
+#   3. Repository variables: SITE_NAME (например, "migrator"), PROD_PORT (например, 3010 — правило prod = 3000+N*10).
+#
+# Логика (ОДИН job — upload/download-artifact между job'ами упирается в квоту
+# хранилища артефактов аккаунта и валит деплой, полевой урок):
+#   build standalone → tar.gz + gzip -t → scp на VPS → gzip -t на VPS → распаковка
+#   в releases/<sha>/ → проверка server.js ДО переключения симлинка → .env из
+#   секрета → симлинк current/ → pm2 delete + start (НЕ restart/reload — pm2
+#   кэширует resolved-путь симлинка) → healthcheck; не 200 → откат симлинка.
+#
+# ~/prod/{site}/shared/data — LEADS_DIR (fallback-лиды, абсолютный путь в env).
+# Деплой и cleanup её НЕ трогают — данные живут между релизами.
+#
+# concurrency не отменяет идущий деплой, а ставит следующий в очередь.
+
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod-${{ vars.SITE_NAME }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_YM_ID: ${{ secrets.NEXT_PUBLIC_YM_ID }}
+          NEXT_PUBLIC_GA_ID: ${{ secrets.NEXT_PUBLIC_GA_ID }}
+
+      - name: Pack standalone bundle
+        # standalone-сборка кладёт server.js + минимальные node_modules в .next/standalone.
+        # Статику и public надо положить рядом — Next их не копирует автоматически.
+        # gzip -t сразу после упаковки — битый архив ловим на runner-е, не на VPS.
+        run: |
+          mkdir -p deploy/.next
+          cp -r .next/standalone/. deploy/
+          cp -r .next/static deploy/.next/static
+          cp -r public deploy/public
+          tar -czf release.tar.gz -C deploy .
+          gzip -t release.tar.gz
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} -H ${{ secrets.SSH_HOST }} \
+            >> ~/.ssh/known_hosts
+
+      - name: Upload and unpack release
+        # Проверки ДО переключения симлинка: gzip -t на VPS-стороне (архив мог
+        # побиться при передаче) и наличие server.js в распакованном релизе.
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          SITE_DIR: /home/deploy/prod/${{ vars.SITE_NAME }}
+          SHA: ${{ github.sha }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 -P ${{ secrets.SSH_PORT || 22 }} \
+            release.tar.gz $TARGET:/tmp/release-$SHA.tar.gz
+          $SSH $TARGET "set -e; \
+            gzip -t /tmp/release-$SHA.tar.gz; \
+            mkdir -p $SITE_DIR/releases/$SHA $SITE_DIR/shared/data; \
+            tar -xzf /tmp/release-$SHA.tar.gz -C $SITE_DIR/releases/$SHA; \
+            rm /tmp/release-$SHA.tar.gz; \
+            test -f $SITE_DIR/releases/$SHA/server.js || \
+              { echo 'server.js отсутствует в релизе — стоп до симлинка'; exit 1; }"
+
+      - name: Push .env from secrets
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          ENV_FILE: /home/deploy/prod/${{ vars.SITE_NAME }}/releases/${{ github.sha }}/.env
+        run: |
+          $SSH $TARGET "cat > $ENV_FILE && chmod 600 $ENV_FILE" <<'EOF'
+          ${{ secrets.PROD_ENV_FILE }}
+          EOF
+
+      - name: Activate release (symlink switch + pm2 + healthcheck)
+        # pm2 delete + start, НЕ restart/reload: pm2 кэширует resolved-путь
+        # симлинка и после переключения current/ продолжит крутить старый релиз.
+        # PORT и HOSTNAME=127.0.0.1 — в env pm2-команды: standalone server.js
+        # читает их из ОС-окружения, не из .env.
+        # Healthcheck не 200 → откат симлинка на предыдущий релиз + exit 1.
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+        run: |
+          $SSH $TARGET \
+            SITE_DIR=/home/deploy/prod/${{ vars.SITE_NAME }} \
+            SHA=${{ github.sha }} \
+            PM2_NAME=${{ vars.SITE_NAME }}-prod \
+            PORT=${{ vars.PROD_PORT }} \
+            bash -s <<'EOF'
+          set -e
+          PREV=$(readlink "$SITE_DIR/current" || true)
+          ln -sfn "$SITE_DIR/releases/$SHA" "$SITE_DIR/current"
+          pm2 delete "$PM2_NAME" 2>/dev/null || true
+          PORT=$PORT HOSTNAME=127.0.0.1 \
+            pm2 start "$SITE_DIR/current/server.js" --name "$PM2_NAME"
+          pm2 save
+          sleep 5
+          CODE=$(curl -sI -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || echo 000)
+          if [ "$CODE" != "200" ]; then
+            echo "Healthcheck: $CODE вместо 200 — откатываю симлинк"
+            if [ -n "$PREV" ] && [ "$PREV" != "$SITE_DIR/releases/$SHA" ]; then
+              ln -sfn "$PREV" "$SITE_DIR/current"
+              pm2 delete "$PM2_NAME" 2>/dev/null || true
+              PORT=$PORT HOSTNAME=127.0.0.1 \
+                pm2 start "$SITE_DIR/current/server.js" --name "$PM2_NAME"
+              pm2 save
+            fi
+            exit 1
+          fi
+          EOF
+
+      - name: Cleanup old releases (keep last 5)
+        # shared/ лежит рядом с releases/ и cleanup её не касается.
+        env:
+          SSH: ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT || 22 }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+          RELEASES_DIR: /home/deploy/prod/${{ vars.SITE_NAME }}/releases
+        run: |
+          $SSH $TARGET "cd $RELEASES_DIR && ls -1tr | head -n -5 | xargs -r rm -rf"

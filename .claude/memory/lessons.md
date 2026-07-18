@@ -54,7 +54,7 @@ type: project
 **Фикс:** Сгенерирован новый webhook в Bitrix → обновлён `BITRIX_WEBHOOK_URL`
 в `.env` на проде → `pm2 restart`.
 
-**Профилактика:** Добавлен fallback в `data/leads.json` (был, но не проверялся).
+**Профилактика:** Добавлен fallback в `data/leads.jsonl` (был, но не проверялся).
 Добавлен мониторинг: cron каждые 6 часов проверяет последний лид в CRM.
 -->
 

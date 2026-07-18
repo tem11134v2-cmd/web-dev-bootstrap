@@ -1,24 +1,27 @@
-# Spec 01b: Server handoff (Claude пишет в репо, человек применяет на VPS)
+# Spec 01b: Server handoff (деплой-инфраструктура в репо + подключение VPS)
+
+> Оркестрация: builder-sonnet (Ask first — ключи и merge остаются за человеком); параллель: с 02–06; verifier: не нужен (гейт = зелёный Actions-run)
 
 ## KB files to read first
 
 - docs/deploy.md (push-based flow, структура `releases/<sha>/`)
-- docs/server-add-site.md (для справки, **не для исполнения**)
+- docs/server-add-site.md (исполняет Claude по SSH, человек рядом)
 - docs/spec.md (домен)
 - `.claude/memory/references.md`
-- `_BUILD/v3/templates/deploy-prod.yml.example` — канонический шаблон workflow, бери оттуда
-- `_BUILD/v3/templates/deploy-dev.yml.example` — то же для dev (если нужен preview)
+- `_BUILD/templates/deploy-prod.yml.example` — канонический шаблон workflow, бери оттуда
+- `_BUILD/templates/deploy-dev.yml.example` — то же для dev (если нужен preview)
+- `_BUILD/templates/deploy-readme.md.example` — шаблон чек-листа `deploy/README.md`
 
 ## Goal
 
-Сгенерировать в репозитории всё, что нужно, чтобы разработчик (пользователь) за ~30 минут подключил сайт на уже готовый VPS под **push-based deploy** (build на runner → rsync артефакта → атомарный switch симлинка):
+Сгенерировать в репозитории всё, что нужно, чтобы за ~30 минут подключить сайт на уже готовый VPS под **push-based deploy** (build на runner → tar.gz по scp → проверки на VPS → атомарный switch симлинка):
 
 - `.github/workflows/deploy-prod.yml` (+ опционально `deploy-dev.yml`);
 - `deploy/{site}.caddy.example` — шаблон Caddy-конфига с подставленным доменом и портами;
-- `deploy/README.md` — чек-лист действий для пользователя, сшитый из `docs/server-manual-setup.md`, `docs/server-add-site.md`, `docs/domain-connect.md`;
-- сгенерировать на Mac разработчика single-purpose SSH-ключ для деплоя (пользователь выполняет команду из `deploy/README.md`).
+- `deploy/README.md` — чек-лист подключения из шаблона `_BUILD/templates/deploy-readme.md.example`;
+- single-purpose SSH-ключ для деплоя генерируется на Mac разработчика (команда — в `deploy/README.md`).
 
-**Claude не ходит по SSH на сервер.** Всё, что требует VPS-доступа — человек делает сам по `deploy/README.md`.
+**SSH — по канону CLAUDE.md (раздел Rules):** серверные шаги из `deploy/README.md` Claude может выполнить сам по SSH, предупредив пользователя, что именно собирается сделать. Человеку остаётся только то, что требует чужих GUI: DNS у регистратора, оплата VPS, выдача ключей/паролей.
 
 ## Входные данные
 
@@ -35,22 +38,20 @@
 
 ### 1. `.github/workflows/deploy-prod.yml`
 
-Скопируй шаблон из `_BUILD/v3/templates/deploy-prod.yml.example` в `.github/workflows/deploy-prod.yml`. Менять в нём почти ничего не нужно — все per-site значения вынесены в Variables/Secrets:
+Скопируй шаблон из `_BUILD/templates/deploy-prod.yml.example` в `.github/workflows/deploy-prod.yml`. Менять в нём почти ничего не нужно — все per-site значения вынесены в Variables/Secrets:
 
 - `vars.SITE_NAME` — имя сайта.
+- `vars.PROD_PORT` — прод-порт из `~/ports.md` (для dev-workflow — `vars.DEV_PORT`); настроить в repo → Settings → Variables вместе с секретами.
 - `secrets.SSH_PRIVATE_KEY`, `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `PROD_ENV_FILE`.
 - `secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `NEXT_PUBLIC_YM_ID` / `NEXT_PUBLIC_GA_ID` — если используются на билде.
 
-Что workflow делает (тезисно, для понимания):
+Что workflow делает (тезисно, для понимания). Один job build+deploy (environment: production; без upload-artifact — экономит квоту аккаунта): checkout → pnpm install → `pnpm build` (ENV-переменные из секретов попадают в standalone-сборку) → упаковка `.next/standalone` + `.next/static` + `public/` в `release.tar.gz` + `gzip -t` на runner-е → `scp` на VPS → там снова `gzip -t`, распаковка в `releases/<sha>/` и проверка наличия `server.js` — всё ДО переключения симлинка → пишет `.env` из `PROD_ENV_FILE` → `ln -sfn releases/<sha> current` → перезапуск PM2 (после смены симлинка — `delete && start` с `PORT=... HOSTNAME=127.0.0.1`, не `restart` — PM2 кэширует resolved-путь) → healthcheck `curl`; не 200 — автооткат симлинка на предыдущий релиз и красный run → cleanup старых релизов (last 5, `shared/` не трогает).
 
-1. **build job:** checkout → pnpm install → `pnpm build` (ENV-переменные из секретов попадают в standalone-сборку) → упаковывает `.next/standalone` + `.next/static` + `public/` в `deploy/` → uploads as artifact `app`.
-2. **deploy job (environment: production):** скачивает artifact → ssh-keygen для приватного ключа из `SSH_PRIVATE_KEY` → `rsync -az --delete deploy/ deploy@VPS:releases/<sha>/` → пишет `.env` из `PROD_ENV_FILE` секрета → `ln -sfn releases/<sha> current` → `pm2 reload {site}-prod --update-env` (или `pm2 start current/server.js` при первом деплое) → cleanup старых релизов (last 5).
-
-`concurrency: group: deploy-prod-${{ vars.SITE_NAME }}` + `cancel-in-progress: false` ставит параллельные деплои в очередь — два rsync-а в одну папку могут испортить артефакт.
+`concurrency: group: deploy-prod-${{ vars.SITE_NAME }}` + `cancel-in-progress: false` ставит параллельные деплои в очередь — две выгрузки (scp + распаковка) в одну папку могут испортить релиз.
 
 ### 2. `.github/workflows/deploy-dev.yml` (если нужен preview)
 
-Скопируй `_BUILD/v3/templates/deploy-dev.yml.example` в `.github/workflows/deploy-dev.yml`. Отличия от prod:
+Скопируй `_BUILD/templates/deploy-dev.yml.example` в `.github/workflows/deploy-dev.yml`. Отличия от prod:
 - триггер на ветке `dev`,
 - `environment: dev` (отдельный набор Environment Secrets, в т.ч. `DEV_ENV_FILE`),
 - путь на VPS `~/dev/{site}/`,
@@ -61,105 +62,19 @@
 
 ### 3. `deploy/{site}.caddy.example`
 
-Caddy-шаблон для этого сайта. Базовый блок (бери из `docs/server-add-site.md` § 4):
+Caddy-шаблон для этого сайта. Prod-блок **бери целиком из `docs/server-add-site.md` § 4** (включая security headers и кэш-директивы) — не пересобирай по памяти, подставь только `{domain}` и `{prod-port}`.
 
-```caddyfile
-{domain}, www.{domain} {
-    reverse_proxy localhost:{prod-port}
-    encode gzip zstd
-
-    @static path *.css *.js *.woff2 *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico
-    header @static Cache-Control "public, max-age=31536000, immutable"
-
-    @html path / *.html
-    header @html Cache-Control "public, max-age=0, must-revalidate"
-}
-```
-
-Если есть dev-поддомен — добавь второй блок с `dev.{domain}`, `localhost:{dev-port}` и `basicauth` (placeholder `<bcrypt-hash>` — пользователь сгенерирует через `caddy hash-password`).
+Если есть dev-поддомен — добавь второй блок `dev.{domain}`; его отличия от prod-блока: `reverse_proxy localhost:{dev-port}`, `basicauth` (placeholder `<bcrypt-hash>` — пользователь сгенерирует через `caddy hash-password`) и `header X-Robots-Tag "noindex, nofollow"`.
 
 SSL Caddy выпустит сам после первого HTTPS-запроса (HTTP-01 challenge через 80 порт). В шаблоне НЕ пиши блоки про сертификаты — Caddy управляет ими автоматически.
 
 ### 4. `deploy/README.md`
 
-Короткий (~80 строк) пошаговый чек-лист **для пользователя**. Структура:
+Скопируй шаблон `_BUILD/templates/deploy-readme.md.example` в `deploy/README.md` и заполни плейсхолдеры значениями ЭТОГО сайта: `{site}`, `{domain}`, `{ip}`, `{ssh-port}`, порты, `{owner}`. Не дублируй содержимое `docs/server-*.md` — в README только конкретные значения и порядок шагов.
 
-```markdown
-# Deploy: {site}
+Шаги с SSH из README Claude может выполнить сам (канон CLAUDE.md), предупредив пользователя. Человеку остаются: DNS у регистратора, GitHub-аккаунт, выдача ключей/паролей.
 
-## Что у тебя уже есть
-- VPS {fresh|существующий} на {ip}, SSH-порт {ssh-port}.
-- Домен `{domain}`{и `dev.{domain}` если есть}, A-запись на {ip} (см. § 1).
-
-## 1. DNS
-A-запись {domain} → {ip}. Если есть dev-поддомен — `dev.{domain}` → {ip}.
-Подробности — `docs/domain-connect.md`. Дождись `dig +short {domain}` показывает {ip}.
-
-## 2. VPS bootstrap (если свежий)
-Один раз на VPS:
-1. `ssh-copy-id root@{ip}` с Mac.
-2. `ssh root@{ip} 'CADDY_ADMIN_EMAIL=<email> bash -s' < scripts/bootstrap-vps.sh`.
-Подробности — `docs/server-manual-setup.md`.
-
-## 3. Сгенерировать deploy-ключ на Mac
-   ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/{site}-deploy -N "" -C "{site}-deploy"
-   ```
-Public-часть в authorized_keys на VPS:
-   ```bash
-   ssh-copy-id -i ~/.ssh/{site}-deploy.pub -p {ssh-port} deploy@{ip}
-   ```
-Проверь: `ssh -i ~/.ssh/{site}-deploy -p {ssh-port} deploy@{ip} 'hostname'` отвечает.
-
-## 4. GitHub Environment + Secrets
-GitHub → репо → Settings → Environments → создать `production`. В Secrets положить:
-- `SSH_PRIVATE_KEY` — содержимое `~/.ssh/{site}-deploy` (приватная часть).
-- `SSH_HOST` — `{ip}`.
-- `SSH_USER` — `deploy`.
-- `SSH_PORT` — `{ssh-port}`.
-- `PROD_ENV_FILE` — содержимое локального `.env.production` целиком (multiline). Создавай через
-   ```bash
-   gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} \
-     < ~/projects/{site}/.env.production
-   ```
-- (если используются на билде) `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_YM_ID`, `NEXT_PUBLIC_GA_ID`.
-
-В Variables (repository, не environment): `SITE_NAME` = `{site}`.
-
-После загрузки в GitHub Secrets — удали приватный `~/.ssh/{site}-deploy` с Mac (опционально, безопаснее).
-
-Для dev-поддомена — отдельный environment `dev` с собственным `DEV_ENV_FILE`.
-
-## 5. Папка под релизы и Caddy на VPS
-По `docs/server-add-site.md` § 3 и § 4:
-   ```bash
-   ssh deploy@{ip} 'mkdir -p ~/prod/{site}/releases'
-   ```
-Скопируй `deploy/{site}.caddy.example` в `/etc/caddy/Caddyfile.d/{site}.caddy`, удали `00-placeholder.caddy` если это первый сайт, `caddy validate && systemctl reload caddy`.
-
-## 6. Тестовый деплой
-Любой коммит, попавший в `main`, триггерит `deploy-prod.yml`. Если `main` защищён — мердж PR из `dev`. Если protection недоступна (private + free GitHub) — `git push origin main` напрямую.
-   ```bash
-   # вариант 1 (main защищён):
-   git checkout dev && git commit --allow-empty -m "chore: trigger first deploy" && git push origin dev
-   gh pr create --base main --head dev --title "First deploy" --body "Triggers initial deploy-prod"
-   gh pr merge --squash --auto
-
-   # вариант 2 (нет protection):
-   git push origin main
-   ```
-GitHub → Actions → `Deploy production` должен пройти за 2–4 мин (build на runner, rsync, симлинк). На VPS:
-   ```bash
-   ssh deploy@{ip} 'pm2 logs {site}-prod --lines 20'
-   ```
-Открой `https://{domain}` — должна быть свежая версия.
-
-## 7. Записать в реестр
-- `~/ports.md` на VPS: добавить строку с портами и PM2-именами.
-- `.claude/memory/references.md` в проекте: IP, домен, путь `~/prod/{site}/`, PM2-имя.
-```
-
-Не дублируй содержимое `docs/server-*.md` — только конкретные значения для ЭТОГО сайта (домен, порт, `{site}`, IP).
+Всё, что нужно от заказчика (доступ к DNS/регистратору, ключи внешних сервисов), — сразу строками в `CLIENT-TODO.md` (создан в 00 из `specs/templates/client-todo-template.md`).
 
 ### 5. `.gitignore` проверка
 
@@ -168,13 +83,15 @@ GitHub → Actions → `Deploy production` должен пройти за 2–4 
 ```
 .env*
 !.env.example
-data/leads.json
+data/
 node_modules/
 .next/
 out/
 dist/
 *.log
 ```
+
+`data/` игнорируется каталогом целиком (fallback-лиды `leads.jsonl`, заказы `orders.jsonl` — ПДн не коммитятся никогда).
 
 ### 6. Коммит и push
 
@@ -183,20 +100,23 @@ dist/
 ## Boundaries
 
 - **Never:** коммитить приватные ключи, секреты, `.env`. Если пользователь случайно вставил их в чат — предупреди и **не сохраняй в файлы**.
-- **Never:** пытаться подключаться к VPS по SSH, даже если пользователь дал IP. Claude работает только с локальной папкой и GitHub.
+- **SSH:** по канону CLAUDE.md — предупредив пользователя; read-only проверки (`pm2 status`, `ls releases/`, `curl -I`) и батчированные идемпотентные скрипты, не интерактивные правки на сервере.
 - **Never:** генерировать ключ `~/.ssh/{site}-deploy` сам — это шаг для пользователя в `deploy/README.md`. Claude не должен ни видеть приватные ключи, ни их создавать.
 - **Ask first:** перед push в `main` (обычно pushим в `dev`, merge руками через PR).
 
 ## Done when
 
-- `.github/workflows/deploy-prod.yml` (и `deploy-dev.yml` если нужен) созданы по шаблонам из `_BUILD/v3/templates/`, валидный YAML.
+- `.github/workflows/deploy-prod.yml` (и `deploy-dev.yml` если нужен) созданы по шаблонам из `_BUILD/templates/`, валидный YAML.
 - `deploy/{site}.caddy.example` создан с подставленным доменом и портами (Caddy-шаблон, не nginx).
-- `deploy/README.md` создан, ссылается на все нужные `docs/server-*.md`, содержит конкретные значения для этого сайта.
+- `deploy/README.md` создан из `_BUILD/templates/deploy-readme.md.example`, плейсхолдеры заполнены значениями этого сайта.
 - `.gitignore` проверен.
 - Коммит в `dev`, PR открыт, пользователь его видит.
+- Нужды от заказчика (DNS, ключи) записаны в `CLIENT-TODO.md`.
+- **Гейт:** первый Actions-run зелёный и `https://{domain}` отвечает 200 — иначе к 04 не переходим.
 
 ## Memory updates
 
 - `references.md` — домен prod, dev-поддомен (если есть), IP VPS, пары портов, имя `{site}`, кастомный SSH-порт.
 - `decisions.md` — если были выборы (использовать Cloudflare, включить dev-preview, изменить дефолтный порт SSH) — с **Why:**.
-- `project_state.md` — отметить `01b` done, следующая `02-project-init`. Отдельно пометить: «ждём от пользователя: настройку VPS по `deploy/README.md` + загрузка GitHub Environment Secrets + первый успешный Actions-run».
+- `CLIENT-TODO.md` — DNS-записи, доступы, ключи: всё, что ждём от заказчика.
+- `project_state.md` — отметить `01b` done, следующая `02-project-init`. Отдельно пометить блокер до гейта: «ждём: GitHub Environment Secrets + первый зелёный Actions-run + `https://{domain}` отвечает 200».

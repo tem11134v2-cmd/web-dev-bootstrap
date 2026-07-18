@@ -25,26 +25,30 @@
 
 **Правило выделения:** prod = 3000 + N\*10, dev = prod + 1000. Шаг 10 — чтобы можно было вставить второй процесс того же сайта (воркер, API) без переноса нумерации.
 
-**Актуализируй реестр до клонирования репо** — не после. Это убирает гонку за порт при подключении второго сайта подряд.
+**Актуализируй реестр до всех остальных шагов** (`server-add-site.md` § 1) — не после. Это убирает гонку за порт при подключении второго сайта подряд.
 
 ## PM2
 
 ```bash
 pm2 ls                         # обзор всех процессов
 pm2 logs {site}-prod           # логи конкретного
-pm2 restart {site}-prod        # рестарт
-pm2 reload all                 # zero-downtime рестарт всех
+pm2 restart {site}-prod        # рестарт (НЕ после смены симлинка — см. ниже)
 pm2 save                       # сохранить состояние для автозагрузки
 ```
 
-**Имена процессов должны совпадать с `{site}`-префиксом**, иначе GitHub Actions `pm2 restart` не найдёт что перезапускать. Имя `{site}` фиксируется в `vars.SITE_NAME` в GitHub.
+**Имена процессов должны совпадать с `{site}`-префиксом**, иначе GitHub Actions не найдёт что перезапускать. Имя `{site}` фиксируется в `vars.SITE_NAME` в GitHub.
+
+После смены симлинка `current` — только `pm2 delete` + `pm2 start` с `PORT`/`HOSTNAME` в env (`restart`/`reload` кэширует resolved-путь, см. `docs/deploy.md`).
 
 ## Caddy
 
 Каждый сайт — отдельный файл в `/etc/caddy/Caddyfile.d/`. Подключение — просто положить файл (`/etc/caddy/Caddyfile` подключает их через `import /etc/caddy/Caddyfile.d/*.caddy`):
 
 ```bash
-sudo cp /home/deploy/prod/{site}/deploy/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
+# с Mac (файл {site}.caddy.example лежит в репо — деплой-артефакт папку deploy/ на VPS не привозит):
+scp -P {ssh-port} deploy/{site}.caddy.example deploy@{ip}:/tmp/
+# на VPS:
+sudo mv /tmp/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
 sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
@@ -52,18 +56,15 @@ sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 
 ## Что может пойти не так с несколькими сайтами
 
-1. **Конкуренция за CPU/RAM во время билда.** `pnpm build` у Next.js съедает 1.5–2 GB RAM. Если два сайта билдятся одновременно (например, оба пушили почти одновременно) — OOM. Решения:
-   - Swap (см. `server-manual-setup.md` § 4).
-   - В GitHub Actions выставить `concurrency: { group: "vps-build", cancel-in-progress: false }` — тогда Actions выстроит деплои в очередь.
-   - На мощных сайтах — выносить prod на отдельный VPS.
+На VPS никто не билдит — сборка идёт на GitHub-runner, сервер только принимает артефакты и раздаёт трафик. Поэтому OOM-билды и очереди сборки — не наша проблема; остаётся runtime:
 
-2. **Долгий билд подвешивает другие сайты.** Если билд 30+ секунд и CPU 100% — другие сайты могут отдавать 502 пока не освободится. Это оправданная причина включить CDN/Cloudflare — он будет отдавать кэш при перегрузке origin.
+1. **Пик трафика одного сайта просаживает остальные.** Node-процессы делят CPU/RAM. Swap (см. `server-manual-setup.md` § 4) страхует от OOM-киллера; при регулярных пиках — CDN/Cloudflare на «тяжёлый» сайт или вынос его на отдельный VPS.
 
-3. **Caddy-конфиг одного сайта ломает все.** `caddy validate` перед `reload` — обязателен. Если всё-таки сломал — `sudo systemctl status caddy --no-pager` и `journalctl -u caddy -n 50` покажут, на какой строке какой файл.
+2. **Caddy-конфиг одного сайта ломает все.** `caddy validate` перед `reload` — обязателен. Если всё-таки сломал — `sudo systemctl status caddy --no-pager` и `journalctl -u caddy -n 50` покажут, на какой строке какой файл.
 
-4. **Один сайт доедает всё место на диске** (node_modules, логи PM2, старые билды). Проверяй `df -h` раз в месяц. `pm2 flush` чистит логи. При частых деплоях имеет смысл `pm2 install pm2-logrotate`.
+3. **Один сайт доедает всё место на диске** (логи PM2, накопившиеся релизы). Workflow держит последние 5 релизов (3 dev) сам; проверяй `df -h` раз в месяц. `pm2 flush` чистит логи. При частых деплоях имеет смысл `pm2 install pm2-logrotate`.
 
-5. **SSL на десятках доменов.** Лимит Let's Encrypt — 50 сертификатов на регистрируемый домен в неделю. Для большинства случаев не проблема. Caddy при превышении лимита автоматически фолбэчит на ZeroSSL (если в Caddyfile не зафиксирован конкретный issuer). Для крупного зоопарка субдоменов — смотри в сторону wildcard через DNS-challenge (требует DNS-провайдер, поддерживаемый Caddy plugin'ом).
+4. **SSL на десятках доменов.** Лимит Let's Encrypt — 50 сертификатов на регистрируемый домен в неделю. Для большинства случаев не проблема. Caddy при превышении лимита автоматически фолбэчит на ZeroSSL (если в Caddyfile не зафиксирован конкретный issuer). Для крупного зоопарка субдоменов — смотри в сторону wildcard через DNS-challenge (требует DNS-провайдер, поддерживаемый Caddy plugin'ом).
 
 ## Когда пора выносить сайт на отдельный VPS
 
@@ -75,8 +76,8 @@ sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 
 План выноса:
 1. Заказать второй VPS, пройти `server-manual-setup.md`.
-2. Клонировать репо туда, пройти `server-add-site.md`.
-3. В `deploy-prod.yml` этого сайта поменять `SERVER_IP` на новый.
+2. Повторить `server-add-site.md` для этого сайта на новом VPS (порты, папки, Caddy, ключ Actions).
+3. В GitHub Environment-секретах сайта поменять `SSH_HOST` на новый IP.
 4. Переключить A-запись домена на новый IP.
 5. После нескольких дней наблюдения — удалить старую папку с первого VPS, актуализировать `~/ports.md`.
 

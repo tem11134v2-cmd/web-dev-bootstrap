@@ -1,26 +1,36 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.development)",
+      "Read(./.env.production)",
+      "Read(./.env.*.local)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-start.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\""
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/guard-rm.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-rm.sh\""
           },
           {
             "type": "command",
-            "command": ".claude/hooks/before-push.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/before-push.sh\"",
+            "timeout": 300
           }
         ]
       }
@@ -31,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/format.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\""
           }
         ]
       }
@@ -41,7 +51,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/stop-reminder.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-reminder.sh\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/subagent-stop.sh\"",
+            "timeout": 300
           }
         ]
       }

@@ -2,7 +2,7 @@
 
 Разовая настройка свежего Ubuntu-VPS. Источник истины — `scripts/bootstrap-vps.sh` (идемпотентный, протестированный на Ubuntu 24.04 Timeweb в апреле 2026). Этот документ — описание **как** этот скрипт использовать и **почему** он делает именно это.
 
-**Формат работы:** Claude запускает скрипт по SSH сам, наблюдает результат. Разработчик подтверждает доступ к серверу и IP.
+**Формат работы:** исполняет Claude по SSH — по канону `CLAUDE.md` (ключ разработчика, батчированные идемпотентные скрипты, предупредив, что собирается сделать); человек рядом — подтверждает доступ к серверу и IP.
 
 ## Что нужно от разработчика
 
@@ -23,8 +23,8 @@
 | 1 | Создаёт пользователя `deploy` без пароля (`adduser --gecos "" --disabled-password`), добавляет в `sudo` group, копирует SSH-ключ из `/root/.ssh/authorized_keys`, прописывает `NOPASSWD:ALL` в `/etc/sudoers.d/deploy`. |
 | 2 | SSH hardening через drop-in `/etc/ssh/sshd_config.d/99-hardening.conf`: `Port 2222` (nonstandard — режет фоновый брутфорс), `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`. Нейтрализует конфликтующий `50-cloud-init.conf` (на Timeweb/Hetzner там `PasswordAuthentication yes`), комментирует `PermitRootLogin yes` в основном конфиге, переключает с `ssh.socket` на `ssh.service` (иначе Port из конфига игнорируется). `sshd -t` + `systemctl restart ssh.service`. |
 | 3 | UFW: deny incoming / allow outgoing / allow `SSH_PORT`, 80, 443. `ufw --force enable`. Устанавливает fail2ban (строгий jail.local: 3 попытки / 10 мин / 24 ч бан, `backend=systemd` для Ubuntu 24.04) и `unattended-upgrades` (security-only patches, без авто-reboot). |
-| 4 | Swap 2GB через `fallocate`, записывает в `/etc/fstab`. Критично на VPS с ≤4 GB RAM — билд Next.js иначе падает в OOM. |
-| 5 | Node.js 22 (runtime) из NodeSource, Caddy (из официального apt-репо cloudsmith), PM2 глобально через npm. **Под push-based deploy на VPS не ставится ни pnpm, ни git** — билд идёт на GitHub-runner, артефакт rsync-ится сюда; standalone-сборка Next привозит свои `node_modules` внутри. |
+| 4 | Swap 2GB через `fallocate`, записывает в `/etc/fstab`. Билд идёт на GitHub-runner, так что swap — не для билда: это страховка runtime на VPS с ≤2–4 GB RAM (спайки RSS node-процессов, обновления PM2, несколько сайтов разом). |
+| 5 | Node.js 22 (runtime) из NodeSource, Caddy (из официального apt-репо cloudsmith), PM2 глобально через npm. **Под push-based deploy на VPS не ставится ни pnpm, ни git** — билд идёт на GitHub-runner, артефакт приезжает сюда tar.gz-ом (scp); standalone-сборка Next привозит свои `node_modules` внутри. |
 | 6 | Папки `~/prod`, `~/dev` под deploy. Создаёт `~/ports.md` с шаблоном реестра (правило `prod = 3000 + N*10`, `dev = prod + 1000`). |
 | 7 | Кладёт базовый `/etc/caddy/Caddyfile` (глобальный `email` + `import /etc/caddy/Caddyfile.d/*.caddy`), создаёт пустую папку `/etc/caddy/Caddyfile.d/` с placeholder-блоком на `:8080`, проверяет `caddy validate`, `systemctl enable --now caddy`. |
 
@@ -110,13 +110,13 @@ EOF
 
 Ожидаемое:
 - `permitrootlogin no`, `passwordauthentication no`, `pubkeyauthentication yes`.
-- `ufw` active, 22/80/443 allowed.
+- `ufw` active; allowed: `SSH_PORT` (дефолт `2222`), 80, 443. Порт SSH сверяй с тем, что задавал переменной `SSH_PORT`, — не хардкодь 22 в проверке.
 - `fail2ban` active.
 - Swap `2G`.
 - Node `v22.x`, Caddy `2.x`, pm2 `6.x`.
 - Caddy active, `Caddyfile valid`, в `Caddyfile.d/` лежит `00-placeholder.caddy` (заменится на per-site конфиг при первом сайте).
 - `~/prod`, `~/dev`, `~/ports.md` на месте.
-- `pnpm` и `git` не установлены — это **штатно** под push-based deploy (билд на runner, артефакт rsync-ится). Если они стоят с прошлого pre-v3 bootstrap'а — оставь, мешать не будут, но и не нужны.
+- `pnpm` и `git` не установлены — это **штатно** под push-based deploy (билд на runner, артефакт приезжает по scp). Если они стоят с прошлого pre-v3 bootstrap'а — оставь, мешать не будут, но и не нужны.
 - `~/.ssh/authorized_keys` существует и содержит как минимум публичный ключ разработчика. Single-purpose deploy-ключ из spec 01b добавляется к нему отдельным шагом (см. `server-add-site.md`).
 
 ## Частые проблемы (для Claude при запуске)

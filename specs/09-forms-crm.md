@@ -1,204 +1,112 @@
 # Spec 09: Формы, multi-sink доставка лидов, юридическое (152-ФЗ)
 
+> Оркестрация: 09a (код) — builder-opus, subagent-ready | 09b (каналы) — human-gated, ведёт оркестратор; параллель: с 08 запрещена (обе правят layout.tsx) — последовательно; verifier: после пары 08+09
+
 ## KB files to read first
 
-- docs/forms-and-crm.md (полностью — multi-sink архитектура, Server Action, Turnstile, готовые sinks)
-- docs/legal-templates.md (152-ФЗ: cookie-баннер, согласие на ПДн)
-- docs/integrations.md (какие sinks подключаем у этого заказчика)
-- docs/spec.md (контакты заказчика)
-- docs/domain-connect.md (если у заказчика уже есть Cloudflare-аккаунт под DNS — Turnstile там же)
-- `components/forms/ConsultationDialog.tsx` (заглушка из спеки 04)
-- `components/service-page/ServicePageForms.tsx` (заглушки из спеки 05)
+- docs/forms-and-crm.md (целиком — архитектура, Server Action, антиспам, fallback)
+- docs/forms-sink-recipes.md (**только секции подключаемых каналов** — не грузи всё)
+- docs/legal-templates.md (152-ФЗ: cookie-баннер, /privacy, /consent, /offer)
+- docs/integrations.md (какие каналы у этого заказчика)
+- `components/forms/ConsultationDialog.tsx` + `components/service-page/ServicePageForms.tsx` (заглушки из спек 04–05)
 
 ## Goal
 
-Заменить заглушки форм реальной интеграцией: валидация → Server Action → Turnstile verify → **multi-sink доставка** (Sheets / Telegram / CRM) с graceful skip каналов без credentials и fallback в JSON если все упали. Добавить юридическое: cookie-баннер по 152-ФЗ, согласие на обработку ПДн в формах, страницы политики/оферты.
+Заменить заглушки форм рабочей воронкой: валидация → Server Action → honeypot + rate-limit + Turnstile → **multi-sink доставка** с graceful skip неподключённых каналов и JSONL-fallback в `LEADS_DIR`. Добавить юридическое: cookie-баннер, чекбокс согласия, страницы `/privacy` + `/consent`.
 
-> **Ключевая идея архитектуры.** Лид параллельно уходит во все настроенные каналы через `Promise.allSettled`. Каналы независимы: Telegram упал — Sheets всё равно записал. Канал не настроен (нет env) — silently skipped, не считается ошибкой. Все упали → fallback в `data/leads.json` (страховка). Подробности — в `docs/forms-and-crm.md`, читай этот файл целиком перед началом работы.
+> **Минимальный трек (официальный дефолт).** Email-sink (nodemailer + SMTP Яндекса) подключается **сегодня** — заявки идут на почту в день запуска форм. Остальные каналы (Telegram / Sheets / CRM) — по запросу заказчика, хоть через месяц: архитектура multi-sink позволяет включать их без правок форм (env + один файл).
 
-> **Про Server Action vs Route Handler.** Лиды отправляются через Server Action `app/actions/submit-lead.ts`, **не** через Route Handler `app/api/lead/route.ts`. Endpoint `/api/lead` не создаётся. Формы работают через `useActionState` + `<form action={formAction}>` — без `fetch`, с прогрессивным улучшением и CSRF-защитой Next из коробки.
+> **Server Action, не Route Handler.** Лиды идут через `app/actions/submit-lead.ts`, endpoint `/api/lead` не создаётся. Формы — `useActionState` + `<form action={formAction}>`.
+
+## Разделение для оркестратора
+
+- **09a (код)** — subagent-ready: шаги 1–14 не требуют человека (Turnstile — на тест-ключах). Билдер: builder-opus.
+- **09b (каналы)** — human-gated: ключи и чужие GUI. Ведёт оркестратор (или интерактивная сессия), субагенту не отдаётся.
 
 ## Tasks
 
-### 1. Cloudflare Turnstile (антиспам — делается до подключения форм)
+### Часть A (09a): код — без человека
 
-1. Cloudflare Dashboard → Turnstile → Add Site. Domain: production-домен + `localhost`. Widget Mode: **Managed**. Скопировать **Site Key** + **Secret Key**.
-2. Положить ключи в `.env` на Mac:
-   ```
-   NEXT_PUBLIC_TURNSTILE_SITE_KEY=...
-   TURNSTILE_SECRET_KEY=...
-   ```
-   В `.env.example` (в git) — те же строки без значений. Site-key — единственное `NEXT_PUBLIC_` в формах. Secret-key — **никогда** не `NEXT_PUBLIC_`.
-3. Установить клиент: `pnpm add @marsidev/react-turnstile`. Документация — https://developers.cloudflare.com/turnstile/, паттерн интеграции — раздел «Антиспам — Cloudflare Turnstile» в `docs/forms-and-crm.md`.
+1. Установить: `pnpm add @marsidev/react-turnstile nodemailer && pnpm add -D @types/nodemailer`. В `.env.local` — **тестовые ключи Turnstile** (см. `docs/forms-sink-recipes.md` § Turnstile): код и тесты работают до получения боевых.
 
-### 2. Создать структуру `lib/sinks/`
+2. Создать `lib/sinks/index.ts` — `LeadData`, `SinkSkipped`, `allSinks`, `classifySinkResults`. Листинг — `docs/forms-and-crm.md` § Структура lib/.
 
-4. Установить серверные зависимости:
-   ```bash
-   pnpm add googleapis node-telegram-bot-api
-   pnpm add -D @types/node-telegram-bot-api
-   ```
+3. Создать sinks:
+   - `lib/sinks/email.ts` — полный листинг из `forms-sink-recipes.md` § EMAIL (работает сразу после env в 09b).
+   - `lib/sinks/telegram.ts` — полный листинг из § TELEGRAM (голый fetch, зависимостей нет).
+   - `lib/sinks/sheets.ts` и `lib/sinks/crm.ts` — **stubs** (`throw new SinkSkipped(...)` первой строкой, без внешних импортов). Реальные листинги и `pnpm add googleapis` — только при подключении канала в 09b.
 
-5. Создать `lib/sinks/index.ts` — диспетчер с `LeadData`-типом, классом `SinkSkipped`, массивом `allSinks` и helper'ом `classifySinkResults`. Полный код — в `docs/forms-and-crm.md` § «`lib/sinks/index.ts` — диспетчер».
+4. Создать `lib/rate-limit.ts` (6/мин/IP) и `lib/fallback.ts` (JSONL в `LEADS_DIR`) — листинги в `docs/forms-and-crm.md`. Убедиться, что `data/` в `.gitignore`.
 
-6. Создать `lib/sinks/sheets.ts`, `lib/sinks/telegram.ts`, `lib/sinks/crm.ts` — каждая функция начинается с guard'а через `SinkSkipped` если ключи не настроены. Полные шаблоны — в `docs/forms-and-crm.md`.
+5. Создать `app/actions/submit-lead.ts` по листингу `docs/forms-and-crm.md` § Server Action: honeypot → rate-limit → Zod 4 (`z.email()`, `.max()` на полях, `{ error }` вместо errorMap) → Turnstile verify ДО sinks → `Promise.allSettled(allSinks)` → classify → fallback при нуле success → всегда `{ success: true }` пользователю.
 
-   **Важно:** `crm.ts` создаётся как **stub** (всегда бросает `SinkSkipped("CRM_NOT_CONFIGURED")`). Реальная имплементация — в шаге 10 (или позже, после релиза).
+6. Подключить к формам (`ConsultationDialog.tsx`, `ServicePageForms.tsx`):
+   - `useActionState(submitLead, null)`, `<form action={formAction}>`; RHF — только inline-валидация (`mode: 'onBlur'`).
+   - `<Turnstile />` + hidden `turnstileToken`/`source`, honeypot-поле `company`, кнопка `disabled={isPending || !token}`, `reset()` токена после ответа.
+   - Чекбокс согласия (компонент `components/legal/PdnConsent.tsx`): «Согласен на [обработку персональных данных](/consent/)» + ссылка на `/privacy/` рядом с кнопкой.
 
-7. Создать helper-файлы `lib/rate-limit.ts` и `lib/fallback.ts` — Server Action импортирует их, без них `pnpm build` упадёт. Полные шаблоны — в `docs/forms-and-crm.md` § «Helpers — `lib/rate-limit.ts` и `lib/fallback.ts`».
+7. Cookie-баннер `components/legal/CookieBanner.tsx` (client, текст из `docs/legal-templates.md` § 1): снизу при первом визите, «Принять» / «Отклонить» / «Подробнее» (→ /privacy/), localStorage-флаг `cookieConsent` (`accepted` / `rejected`), не блокирует контент. Подключить в `app/layout.tsx`. На «Принять» — `window.dispatchEvent(new Event('cookie-consent'))` (спека 10 подвесит на это счётчики); при `cookieConsent=rejected` счётчики не грузятся.
 
-### 3. Server Action
+8. Юр-страницы (канон — `docs/legal-templates.md`):
+   - `app/privacy/page.tsx` — политика конфиденциальности.
+   - `app/consent/page.tsx` — согласие на обработку ПДн (на неё ссылается чекбокс).
+   - `app/offer/page.tsx` — **только если на сайте оплата**, иначе не создавать.
+   - Все — простые server components с prose-стилями. **Индексируются** (никаких `robots: { index: false }` — юр-страницы это коммерческий фактор ранжирования).
+   - Тексты приносит заказчик (или генератор + реквизиты) → пункт в `CLIENT-TODO.md`.
 
-8. Создать `app/actions/submit-lead.ts` с директивой `"use server"`:
-   - Сигнатура `submitLead(prevState, formData: FormData) → LeadState` (тип `LeadState = { success: true } | { error: string } | null`)
-   - Rate limiting через `rateLimit(ip, 10_000)` из `@/lib/rate-limit` (создан в шаге 7). 1 запрос в 10 секунд / IP
-   - Парсинг FormData → объект → Zod-валидация (схема включает `turnstileToken: z.string().min(1)`). Чекбокс `consent` приходит как строка `"on"` — приводим к boolean **до** `safeParse`
-   - **Turnstile verify ДО sinks** — POST на `https://challenges.cloudflare.com/turnstile/v0/siteverify` (тело `application/x-www-form-urlencoded`). При `result.success === false` — `return { error: "Защита от спама не пройдена" }`
-   - **Параллельная доставка во все sinks** через `Promise.allSettled(allSinks.map(...))` + `classifySinkResults`
-   - **Логи:** `console.error` для real failures (есть env, упал API), `console.warn` если `skips.length === allSinks.length` (ни один канал не настроен)
-   - **Fallback** в `data/leads.json` через `appendFallback(data)` из `@/lib/fallback` (создан в шаге 7) — только если `successes.length === 0`
-   - Возврат всегда `{ success: true }` — пользователю не пугаемся (fallback страхует). `{ error: '...' }` только для невалидной формы или капчи.
+9. `components/layout/Footer.tsx` — ссылки на `/privacy/` и `/consent/` (+ `/offer/` если есть).
 
-   Полный snippet — в `docs/forms-and-crm.md` § «Server Action».
+### Локальные тесты 09a (Turnstile на тест-ключах, sinks пустые)
 
-### 4. Sinks: подключение каналов (по выбору заказчика)
+10. Пустой `.env` (только тест-ключи Turnstile): отправить форму → лид в `data/leads.jsonl`, в консоли `pnpm dev` — warning «All lead sinks are not configured», toast «Заявка отправлена!».
+11. Honeypot: заполнить поле `company` через DevTools → «успех» без строки в `leads.jsonl` и без вызова sinks.
+12. Rate-limit: 7 быстрых submit → седьмой получает ошибку «Слишком много запросов».
+13. Turnstile-кейсы: submit без токена — кнопка заблокирована; повторный submit тем же токеном → ошибка `timeout-or-duplicate` (значит, забыт `reset()`).
+14. `pnpm build` проходит; секреты не в клиентском бандле (`NEXT_PUBLIC_` — только Turnstile site key). Cookie-баннер: появляется на чистом браузере, после «Принять» не возвращается.
 
-> ⚠️ **Pause-and-wait pattern.** Каждый канал требует от пользователя зайти в **чужой веб-интерфейс** (Google Cloud Console, Telegram через `@BotFather`, CRM-админка) и нажать кнопки. Claude туда не ходит — он только адаптирует код под полученные ключи. Поэтому на каждом канале Claude должен:
->
-> 1. **Спросить пользователя:** «подключаем сейчас или пропускаем?» Без ответа — не идти дальше.
-> 2. Если подключаем — **зачитать в чате pre-req шаги** из `docs/forms-and-crm.md` § «Подготовка X (один раз)» (это инструкция для пользователя, ~5 минут кликов в чужом GUI).
-> 3. **Дождаться** ключей в чате от пользователя.
-> 4. Положить ключи в `~/projects/{site}/.env.production`, создать `lib/sinks/<name>.ts` по шаблону из `docs/forms-and-crm.md`, протестировать локально (отправить форму → проверить канал).
-> 5. Записать в `.claude/memory/references.md`: URL/идентификатор ресурса (БЕЗ ключей).
-> 6. Перейти к следующему каналу (или к следующему шагу спеки если каналы исчерпаны).
->
-> Каждый канал = отдельный коммит и отдельный test. Между коммитами форма продолжает работать (skipped sinks ничего не ломают). Это намеренная архитектурная гарантия multi-sink.
+### Часть B (09b): каналы — human-gated
 
-9. **Google Sheets** (рекомендую первым — заказчик сразу видит лиды).
-   - **[пауза]** Спроси у пользователя: подключаем Sheets сейчас? Если нет — переход к шагу 10.
-   - **[зачитай пре-req пользователю]** Открой `docs/forms-and-crm.md` § «`lib/sinks/sheets.ts` — Google Sheets» → подраздел «Подготовка таблицы (один раз)» (6 шагов в Google Cloud Console + Sheets UI). Зачитай их пользователю в чате как чек-лист — это его ~5 минут работы. **Особо подчеркни шаг 4:** `GOOGLE_SHEETS_PRIVATE_KEY` в `.env.production` обернуть в **двойные кавычки** с литеральными `\n`, иначе на VPS через `PROD_ENV_FILE` heredoc newlines обработаются непредсказуемо.
-   - **[жди]** от пользователя 3 значения: `GOOGLE_SHEETS_CLIENT_EMAIL`, `GOOGLE_SHEETS_PRIVATE_KEY`, `GOOGLE_SHEETS_SPREADSHEET_ID`. Опционально `GOOGLE_SHEETS_TAB_NAME` (дефолт `Leads`).
-   - Положи в `.env.local` (для локальной разработки) и в `~/projects/{site}/.env.production` (для прода). Создай `lib/sinks/sheets.ts` по шаблону.
-   - **[тест]** Отправь форму локально → строка должна появиться в таблице.
-   - В `.claude/memory/references.md`: URL Google-таблицы, email service account.
+15. **Один батч-вопрос человеку** (не пауза на каждый канал!). Спросить сразу всё списком:
+    - Боевые ключи Turnstile (Cloudflare → Add Site; чек-лист — `forms-sink-recipes.md` § Turnstile).
+    - **Email (дефолт, подключаем сегодня):** ящик-отправитель + пароль приложения Яндекса + адрес получателя (чек-лист «Подготовка канала» § EMAIL).
+    - Telegram — подключаем? Если да: `TG_BOT_TOKEN` + `TG_CHAT_ID` (чек-лист § TELEGRAM).
+    - Sheets — подключаем? Если да: 3 значения `GOOGLE_SHEETS_*` (чек-лист § SHEETS; подчеркнуть двойные кавычки + литеральные `\n` у private key).
+    - CRM — подключаем? Какая? Если AmoCRM: `AMO_CRM_URL` + `AMO_CRM_TOKEN` (§ AMOCRM); Bitrix24: `BITRIX_WEBHOOK_URL` (§ BITRIX24).
 
-10. **Telegram** (вторым — уведомление в чат команды).
-    - **[пауза]** Спроси у пользователя: подключаем Telegram сейчас? Если нет — переход к шагу 11.
-    - **[зачитай пре-req пользователю]** Открой `docs/forms-and-crm.md` § «`lib/sinks/telegram.ts` — Telegram-бот» → подраздел «Подготовка бота (один раз)» (5 шагов в Telegram-приложении). Зачитай как чек-лист.
-    - **[жди]** от пользователя `TG_BOT_TOKEN` + `TG_CHAT_ID`.
-    - Положи в `.env.local` и `.env.production`. Создай `lib/sinks/telegram.ts` по шаблону.
-    - **[тест]** Отправь форму локально → сообщение должно прийти в чат с HTML-разметкой.
-    - В `.claude/memory/references.md`: имя бота, тип чата (личный / групповой / канал), кто из команды получает уведомления.
+    Всё, что заказчик не может дать сейчас, — строками в `CLIENT-TODO.md` («Доступы»: SMTP-пароль приложения, вебхук CRM и т.д.). Каналы без ключей остаются stubs — форма работает.
 
-11. **CRM** (опционально — обычно подключают позже, на этапе масштабирования воронки).
-    - **[пауза]** Спроси у пользователя: подключаем CRM сейчас? Если нет — `lib/sinks/crm.ts` остаётся stub'ом, переход к шагу 12. Sheets+Telegram продолжают работать.
-    - Если да — спроси какая CRM: AmoCRM / Bitrix24 / RetailCRM / другая.
-    - **[зачитай пре-req пользователю]** Если AmoCRM/Bitrix24 — там готовые шаблоны кода в `docs/forms-and-crm.md` § «CRM-интеграции (готовые шаблоны)», а пользователю нужно получить только ключи. Для **AmoCRM** зачитай раздел «Подготовка amoCRM (один раз)» (создать интеграцию → вкладка «Ключи и доступы» → сгенерировать **долгосрочный токен**); ключи — `AMO_CRM_URL` + `AMO_CRM_TOKEN`, опционально `AMO_CRM_PIPELINE_ID`/`AMO_CRM_STATUS_ID` для маршрутизации в конкретную воронку/этап. Для **Bitrix24** — webhook URL. Если другая CRM — прочитай документацию провайдера, спроси у пользователя auth-формат и endpoint.
-    - **[жди]** от пользователя ключи (формат зависит от CRM).
-    - Замени **тело** `lib/sinks/crm.ts` (был stub `throw new SinkSkipped`) на реальный POST по шаблону, оставив `SinkSkipped`-guard в начале на случай если ключи не положили.
-    - Положи в `.env.local` и `.env.production` нужные переменные.
-    - **[тест]** Отправь форму локально → лид появится в CRM (открой её UI и убедись).
-    - В `.claude/memory/references.md`: название CRM, URL аккаунта, контакт ответственного.
+16. По мере получения ключей — на каждый канал: env в `.env.local` + `~/projects/{site}/.env.production` → полный листинг sink'а из `forms-sink-recipes.md` (для sheets/crm — заменить stub, для sheets ещё `pnpm add googleapis`) → локальный тест (форма → канал принял) → запись в `.claude/memory/references.md` (URL/ID ресурса, БЕЗ ключей). **Каждый канал = отдельный коммит.** Порядок не блокирует: неподключённые каналы — `SinkSkipped`.
 
-### 5. Подключение к формам
+17. Частично настроенный `.env` (например, только email): лид проходит, в консоли `pnpm dev` нет ошибок (skip ≠ error), письмо пришло.
 
-12. В `components/forms/ConsultationDialog.tsx`:
-    - Реальная валидация (Zod-схема: name min 2, phone min 10, опционально email/message). RHF используется только для inline-валидации полей (`mode: 'onBlur'`) — submit обрабатывает Server Action.
-    - `<Turnstile />` виджет: `siteKey` из `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `onSuccess={setToken}`, ref для `reset()` после успешного state (токен одноразовый — иначе `timeout-or-duplicate` от CF)
-    - `useActionState(submitLead, null)` → `[state, formAction, isPending]`. `<form action={formAction}>`. Turnstile-токен и `source` идут как hidden-инпуты.
-    - Кнопка `disabled={isPending || !token}`.
-    - Реакция на `state` через `useEffect`: `state.success` → toast зелёный + `turnstileRef.current?.reset()`, `state.error` → toast красный.
+### Деплой
 
-13. В `components/service-page/ServicePageForms.tsx` — то же для inline mid/final CTA (включая `<Turnstile />`).
-
-14. Добавить в каждую форму **чекбокс согласия на обработку ПДн** (компонент `components/legal/PdnConsent.tsx`):
-    ```tsx
-    <Checkbox name="consent" required />
-    <span className="text-xs">Согласен с <a href="/privacy/">политикой конфиденциальности</a></span>
-    ```
-
-   Полный пример клиентской формы — `docs/forms-and-crm.md` § «Клиентская часть».
-
-### 6. Cookie-баннер (152-ФЗ)
-
-15. Создать `components/legal/CookieBanner.tsx` (client) — текст из `docs/legal-templates.md`:
-    - Появляется снизу при первом визите
-    - Кнопки «Принять» / «Подробнее» (ссылка на /privacy/)
-    - localStorage-флаг чтобы не показывать повторно
-    - Не блокирует контент (баннер, не модалка)
-16. Подключить в `app/layout.tsx`.
-
-### 7. Юридические страницы
-
-17. Создать `app/privacy/page.tsx` — текст политики конфиденциальности (пользователь приносит готовый из генератора, вставляем как есть, оборачиваем в `prose`)
-18. Создать `app/terms/page.tsx` — оферта/условия (если применимо, иначе пропустить)
-19. Обе страницы:
-    - `metadata: { robots: { index: false, follow: true } }` — обычно не индексируются
-    - Простой server component с prose-стилями
-20. Обновить `components/layout/Footer.tsx` — добавить ссылки на `/privacy/` и `/terms/`.
-
-### 8. Тестирование
-
-21. Локально с **полностью настроенным** `.env` — заполнить форму, отправить, проверить:
-    - Turnstile-виджет показывается, после прохождения токен попадает в payload
-    - Лид появился в **Sheets** (свежая строка в таблице)
-    - Лид пришёл в **Telegram** (сообщение в чат)
-    - Лид пришёл в **CRM** (если подключена) или skipped (если stub)
-    - Toast показал результат
-    - Чекбокс ПДн обязателен (без него submit blocked)
-
-22. Локально с **частично настроенным** `.env` (например, только Sheets — без Telegram-ключей):
-    - Лид всё равно проходит (Telegram-канал silently skipped)
-    - В `pm2 logs` (или `console`) НЕ должно быть ошибок (skip — это не error)
-    - Лид появился в Sheets, остальные каналы пропустились без шума
-
-23. Локально с **пустым** `.env` (только Turnstile настроен) — все sinks skip:
-    - Лид сохранился в `data/leads.json`
-    - В `pm2 logs` warning: `All lead sinks are not configured. Set GOOGLE_SHEETS_*, TG_BOT_TOKEN, or AMO_CRM_* in .env to start receiving leads.`
-    - Toast «Заявка отправлена!» (пользователь не должен видеть отсутствие настройки)
-
-24. Turnstile-edge-кейсы:
-    - Submit без прохождения виджета → toast «Подтвердите, что вы не робот», на сервер не идём
-    - Двойной submit с одним токеном → 400 «Captcha failed» (`error-codes: timeout-or-duplicate`) — значит, `reset()` после успешного submit не вызывается, фикс в форме
-
-25. Cookie-баннер появляется на чистом браузере, исчезает после «Принять», не возвращается.
-26. Rate limiting — два быстрых submit с одного IP → второй вернёт ошибку.
-27. `pnpm build` проходит, `.env` переменные не попали в клиентский бандл (не использовать `NEXT_PUBLIC_` для секретов, кроме `NEXT_PUBLIC_TURNSTILE_SITE_KEY`).
-
-### 9. Деплой
-
-28. Обновить локальный `~/projects/{site}/.env.production` — добавить все env-переменные подключённых каналов.
-
-29. Загрузить весь `.env.production` в GitHub Environment Secret `PROD_ENV_FILE`:
+18. В `~/projects/{site}/.env.production` — все env подключённых каналов + `LEADS_DIR=/home/deploy/prod/{site}/shared/data` (папка вне releases/ — деплой её не трогает; создание — `docs/server-add-site.md`).
+19. Загрузить секрет:
     ```bash
-    gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} \
-      < ~/projects/{site}/.env.production
+    gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} < ~/projects/{site}/.env.production
     ```
-
-30. Push в `dev` → проверка на preview (если есть dev-поддомен) → PR в `main` → автодеплой через GitHub Actions.
-
-31. На проде — отправить тестовую заявку, убедиться что доходит во все настроенные каналы.
+20. Push в `dev` → preview → PR в `main` → автодеплой. На проде — тестовая заявка: доходит во все подключённые каналы, `pm2 logs {site}-prod` без sink-ошибок.
 
 ## Boundaries
 
-- **Always:** валидация И на клиенте И на сервере (Zod в обоих местах). Все секреты в `.env`. Согласие на ПДн обязательно. Turnstile verify ДО sinks. Skip vs fail различать через `SinkSkipped`-класс. **На каждом канале (шаги 9-11) сначала спросить пользователя «подключаем сейчас?», зачитать pre-req из `docs/forms-and-crm.md`, дождаться ключей, и только потом писать код** — Claude не ходит в Google Cloud Console / `@BotFather` / CRM-админку, эти действия только за пользователем.
-- **Ask first:** какие каналы подключаем у этого заказчика (если не указано в `docs/integrations.md`); если CRM требует нестандартного маппинга полей; если у заказчика нет готовой политики/оферты (предложить шаблонные генераторы).
-- **Never:** коммитить `.env`. Класть `TURNSTILE_SECRET_KEY` или service-account JSON в `NEXT_PUBLIC_*`. Отправлять данные без согласия на ПДн. Делать exit-intent попап на мобильном. Возвращать `{ error: ... }` пользователю при упавшем sink (он не виноват, fallback страхует). **Создавать `lib/sinks/<name>.ts` с реальной логикой до получения ключей от пользователя** — без env-переменных в `.env.local` тест локально не пройдёт, и время потратится зря.
+- **Always:** валидация и на клиенте, и на сервере (Zod 4 в обоих). Turnstile verify ДО sinks. Skip vs fail — через `SinkSkipped`. Email-канал — первый. Ключи и чужие GUI (Cloudflare, Яндекс ID, `@BotFather`, Google Cloud Console, CRM-админки) — только человек; Claude собирает потребности в один батч-вопрос и пункты в `CLIENT-TODO.md`.
+- **Ask first:** какие каналы подключаем (если нет в `docs/integrations.md`) — в составе батч-вопроса шага 15; нестандартный маппинг полей CRM; если у заказчика нет текстов юр-страниц (предложить шаблоны из `docs/legal-templates.md`).
+- **Never:** коммитить `.env` или `data/`. Секреты в `NEXT_PUBLIC_*`. Отправка без согласия на ПДн. `robots: { index: false }` на юр-страницах. Exit-intent попап на мобильном. `{ error }` пользователю при упавшем sink (fallback страхует). Писать реальную логику sheets/crm-sink-ов до получения ключей (email и telegram пишутся полными в 09a — локально тестируются без env как `SinkSkipped`).
 
 ## Done when
 
-- `app/actions/submit-lead.ts` существует, валидирует, проверяет Turnstile, использует `Promise.allSettled` поверх `allSinks`, имеет fallback в JSON. Файла `app/api/lead/route.ts` в проекте **нет**.
-- `lib/sinks/index.ts` + `sheets.ts` + `telegram.ts` + `crm.ts` созданы. Каждый sink с `SinkSkipped`-guard'ом.
-- Все формы (consultation dialog, mid/final CTA) работают на проде через Server Action с виджетом Turnstile.
-- Подключённые каналы (минимум Sheets, обычно Sheets+Telegram) принимают тестовый лид с прода.
-- Cookie-баннер показывается, юридические страницы доступны.
-- Согласие на ПДн обязательно во всех формах.
-- Тестовая заявка с прода доходит во все настроенные каналы; submit без Turnstile-токена корректно отклоняется; submit при отвалившемся канале не ломает другие.
+- `app/actions/submit-lead.ts`: honeypot + rate-limit 6/мин + Zod 4 + Turnstile + `Promise.allSettled` + JSONL-fallback. Файла `app/api/lead/route.ts` **нет**.
+- `lib/sinks/` создан; email.ts и telegram.ts — полные, неподключённые каналы — stubs с `SinkSkipped`.
+- Все формы работают через Server Action; тесты 10–14 и 17 пройдены.
+- **Email-канал принимает лид с прода** (минимальный трек); остальные подключённые — тоже.
+- `/privacy` + `/consent` (+ `/offer` при оплате) доступны и индексируемы; cookie-баннер работает; согласие обязательно во всех формах.
+- Недостающее от заказчика — строками в `CLIENT-TODO.md`.
 
 ## Memory updates
 
-- `references.md` — какие sinks подключены (Sheets-таблица URL, TG-чат имя, CRM название), их аккаунты/owner'ы. **БЕЗ** ключей и токенов (только ссылки и факты).
-- `pointers.md` — `app/actions/submit-lead.ts`, `lib/sinks/{index,sheets,telegram,crm}.ts`, `components/legal/*`, Turnstile-виджет в формах (где встроен).
-- `decisions.md` — выбор каналов (почему Sheets+Telegram но не CRM, или наоборот), нюансы маппинга полей в CRM, источник политики (генератор / юрист заказчика), Turnstile mode (Managed vs Invisible) если отступали от дефолта.
-- `lessons.md` — если что-то сломалось при интеграции (Sheets 403 на доступе, Telegram getChat invalid, `timeout-or-duplicate` от Turnstile, и т.д.).
-- `project_state.md` — done, следующая `10-analytics`.
+- `references.md` — подключённые каналы (ящик получателя, имя TG-бота/чата, URL таблицы, CRM), owner'ы. БЕЗ ключей.
+- `pointers.md` — `app/actions/submit-lead.ts`, `lib/sinks/*`, `lib/{rate-limit,fallback}.ts`, `components/legal/*`.
+- `decisions.md` — выбор каналов и почему; источник текстов юр-страниц; отступления от дефолтов Turnstile.
+- `lessons.md` — грабли интеграций (Sheets 403, `timeout-or-duplicate`, 553 от SMTP Яндекса и т.п.).
+- `project_state.md` — done (отметить, какие каналы отложены), следующая `10-analytics`.

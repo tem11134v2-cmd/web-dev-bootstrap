@@ -1,6 +1,6 @@
 # Server: Add Site (подключение нового сайта на готовый VPS)
 
-**Это инструкция для человека.** Проходится один раз на **каждый новый сайт**. Предполагается, что VPS уже прошёл `server-manual-setup.md`.
+**Исполняет Claude по SSH** — по канону `CLAUDE.md` (ключ разработчика, предупредив, что собирается сделать); человек рядом — на шагах с чужими GUI (DNS у регистратора, secrets в репо заказчика). Проходится один раз на **каждый новый сайт**. Предполагается, что VPS уже прошёл `server-manual-setup.md`.
 
 ## Вход
 
@@ -23,44 +23,30 @@ Claude Code в репозитории уже сгенерировал (спек�
 
 См. `docs/domain-connect.md`. Нужно: A-запись `{domain}` → IP сервера, и если нужен preview — A-запись `dev.{domain}` → тот же IP. Дождись распространения (`dig +short {domain}` должен вернуть IP).
 
-## 3. Создать папку для релизов
+## 3. Создать папки: релизы + shared/data
 
-Под push-based deploy VPS не клонирует репо и не билдит — только принимает `rsync`-артефакт от GitHub Actions в `releases/<sha>/` и переключает симлинк `current/`. Здесь нужно только подготовить корневую папку:
+Под push-based deploy VPS не клонирует репо и не билдит — только принимает tar.gz-артефакт от GitHub Actions (scp + распаковка) в `releases/<sha>/` и переключает симлинк `current/`. Подготовить корневые папки:
 
 ```bash
-ssh deploy@{ip} 'mkdir -p ~/prod/{site}/releases'
+ssh deploy@{ip} 'mkdir -p ~/prod/{site}/releases ~/prod/{site}/shared/data'
 ```
 
 Если нужен dev-preview:
 ```bash
-ssh deploy@{ip} 'mkdir -p ~/dev/{site}/releases'
+ssh deploy@{ip} 'mkdir -p ~/dev/{site}/releases ~/dev/{site}/shared/data'
 ```
 
-### Структура папок сайта на VPS
-
-После первого успешного деплоя на VPS будет:
+**`shared/data` — fallback-лиды (JSONL).** В `.env.production` (→ секрет `PROD_ENV_FILE`) добавь:
 
 ```
-/home/deploy/prod/{site}/
-├── releases/
-│   ├── 7f3a9c2…/         ← старый релиз (sha коммита)
-│   ├── b1e8d4f…/         ← предыдущий
-│   └── c5d2a91…/         ← новый, активный
-│       ├── server.js     ← entry point standalone-сборки
-│       ├── .next/
-│       │   └── static/
-│       ├── public/
-│       └── .env          ← пушит workflow из PROD_ENV_FILE secret
-└── current → releases/c5d2a91…/
+LEADS_DIR=/home/deploy/prod/{site}/shared/data
 ```
 
-Симлинк `current` указывает на активный релиз. Switch версии (новый деплой / откат) = атомарный `ln -sfn releases/<new-sha> current`. PM2 запущен на `current/server.js` — после смены симлинка `pm2 reload` подхватывает новый код, просадки даунтайма нет.
+Для dev-поддомена — свой вариант в `DEV_ENV_FILE`: `LEADS_DIR=/home/deploy/dev/{site}/shared/data`.
 
-**Изначально** (до первого workflow) в `~/prod/{site}/` есть только пустая папка `releases/`; `current` ещё не создан. Первый успешный workflow поставит симлинк и запустит `pm2 start current/server.js`. Дальше — только `pm2 reload`.
+Путь абсолютный, симлинк в релиз не нужен; деплой и cleanup релизов эту папку **не трогают** — лиды переживают любые релизы.
 
-Старые релизы чистит сам workflow (оставляет последние 5 для prod, 3 для dev) — на диске не накапливаются.
-
-PM2-процесс стартует workflow — руками здесь не запускаем.
+Полная структура релизов (`releases/<sha>/`, `current`, `shared/`) описана в одном месте — `docs/deploy.md` § «Структура релизов на VPS». Коротко: `current` — симлинк на активный релиз; switch версии = `ln -sfn releases/<new-sha> current` + `pm2 delete`/`start`; до первого workflow `current` не существует — его создаёт первый успешный деплой, PM2-процесс тоже стартует workflow, руками здесь не запускаем. Старые релизы чистит сам workflow (последние 5 prod / 3 dev).
 
 ### SSH-ключ Actions → VPS
 
@@ -83,6 +69,17 @@ cat ~/.ssh/{site}-deploy.pub | ssh -p {ssh-port} deploy@{ip} 'cat >> ~/.ssh/auth
     reverse_proxy localhost:{prod-port}
     encode gzip zstd
 
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    # CSP — опция: составляй под фактический список источников; строгая политика
+    # ломает счётчики (Метрика/GA) и inline-скрипты Next — включай только после проверки.
+    # header Content-Security-Policy "default-src 'self'; ..."
+
     @static path *.css *.js *.woff2 *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico
     header @static Cache-Control "public, max-age=31536000, immutable"
 
@@ -94,16 +91,20 @@ cat ~/.ssh/{site}-deploy.pub | ssh -p {ssh-port} deploy@{ip} 'cat >> ~/.ssh/auth
 dev.{site}.com {
     reverse_proxy localhost:{dev-port}
     encode gzip zstd
+    header X-Robots-Tag "noindex, nofollow"
     basicauth {
         dev <bcrypt-hash>
     }
 }
 ```
 
-Применить:
+Применить (файл `deploy/{site}.caddy.example` лежит в репо на Mac — на VPS деплой-артефакт папку `deploy/` не привозит):
 
 ```bash
-sudo cp /home/deploy/prod/{site}/deploy/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
+# с Mac, из папки проекта:
+scp -P {ssh-port} deploy/{site}.caddy.example deploy@{ip}:/tmp/
+# на VPS:
+sudo mv /tmp/{site}.caddy.example /etc/caddy/Caddyfile.d/{site}.caddy
 sudo nano /etc/caddy/Caddyfile.d/{site}.caddy   # сверь домен / порт / dev-блок
 sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 
@@ -147,6 +148,8 @@ sudo ls -la /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencr
 
 **Variables (Repository):**
 - `SITE_NAME` — имя сайта (совпадает с `{site}` выше и именем PM2-процесса).
+- `PROD_PORT` — prod-порт из `~/ports.md` (§ 1); без него `pm2 start` уйдёт без `PORT=` и первый деплой будет красным.
+- `DEV_PORT` — dev-порт (только если настраивается dev-поддомен).
 
 Для dev-поддомена — отдельный environment `dev` с собственным `SSH_PRIVATE_KEY` (можно тот же ключ) и `DEV_ENV_FILE`.
 
@@ -158,8 +161,12 @@ sudo ls -la /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencr
 
 ```bash
 cd ~/projects/{site}
-# сделай любую незначительную правку в README
-git add README.md && git commit -m "chore: trigger first deploy"
+# вариант 1 (main защищён — стандартный случай): PR из dev
+git checkout dev && git commit --allow-empty -m "chore: trigger first deploy" && git push origin dev
+gh pr create --base main --head dev --title "First deploy" --body "Triggers initial deploy-prod"
+gh pr merge --squash --auto
+
+# вариант 2 (branch protection недоступна — private + free GitHub):
 git push origin main
 ```
 
@@ -180,20 +187,21 @@ pm2 logs {site}-prod --lines 20       # проверь, рестартнулся
 
 - [ ] A-записи ведут на сервер, `dig` подтверждает.
 - [ ] `~/prod/{site}/releases/` создан под deploy.
+- [ ] `~/prod/{site}/shared/data/` создана, `LEADS_DIR` прописан в `PROD_ENV_FILE`.
 - [ ] `~/dev/{site}/releases/` создан (если нужен dev-preview).
 - [ ] Публичная часть `~/.ssh/{site}-deploy.pub` (с Mac) добавлена в `~/.ssh/authorized_keys` пользователя `deploy` на VPS.
 - [ ] `/etc/caddy/Caddyfile.d/{site}.caddy` подключён, `caddy validate` проходит, HTTPS открывается.
 - [ ] SSL выписан Caddy автоматически, `https://{domain}` отдаёт 200/301.
 - [ ] Если это первый сайт — `00-placeholder.caddy` удалён.
-- [ ] GitHub Environment `production` создан, secrets и variables заполнены.
+- [ ] GitHub Environment `production` создан, secrets заполнены; repository variables `SITE_NAME` и `PROD_PORT` (+ `DEV_PORT` при dev-поддомене) выставлены.
 - [ ] Тестовый push в `main` прогнал pipeline успешно — на VPS появилась `releases/<sha>/` и симлинк `current → releases/<sha>`, PM2 стартанул `current/server.js` на нужном порту.
 - [ ] `~/ports.md` и `.claude/memory/references.md` актуальны.
 
 ## Частые проблемы
 
-- **502 после деплоя** → `pm2 logs {site}-prod --lines 50`. Часто — `current/server.js` указывает на пустую папку (rsync не дошёл) либо в `.env` нет нужной переменной.
+- **502 после деплоя** → `pm2 logs {site}-prod --lines 50`. Часто — `current/server.js` указывает на пустую папку (артефакт не доехал/не распаковался) либо в `.env` нет нужной переменной.
 - **`Permission denied (publickey)` в Actions** → публичная часть single-purpose ключа не добавлена в `/home/deploy/.ssh/authorized_keys`, либо в GitHub Secrets `SSH_PRIVATE_KEY` лежит другой ключ. Проверь обе стороны.
-- **`rsync: No such file or directory`** → не создана `~/prod/{site}/releases/` под `deploy` (см. § 3) или у `deploy` нет прав на запись.
+- **Шаг `Upload and unpack release` упал** → смотри сигнатуру: `scp: Permission denied` (ключ/права), `gzip: unexpected end of file` / `tar: short read` (битый архив), `server.js отсутствует в релизе` (кривая упаковка). Права на `~/prod/{site}/` — под `deploy` (см. § 3).
 - **`current` не переключился** → проверь `readlink -f ~/prod/{site}/current` после workflow; если симлинк не обновился — у `deploy` нет прав на `ln -sfn` (вряд ли, обычно проблема в путях с пробелами).
 - **PM2 не находит `current/server.js`** → workflow не успел положить standalone-артефакт целиком; проверь `ls ~/prod/{site}/current/` — должны быть `server.js`, `.next/`, `public/`. Если первый деплой — `pm2 start current/server.js --name {site}-prod` руками.
 - **Caddy не выпускает SSL** → `dig +short {domain}` не показывает IP сервера (DNS не пропагнулся), либо `ufw` блокирует 80/443. Лог: `journalctl -u caddy -n 50 | grep -i obtain`.

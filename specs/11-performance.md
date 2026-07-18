@@ -1,9 +1,11 @@
 # Spec 11: Performance audit + оптимизация (Lighthouse 90+)
 
+> Оркестрация: builder-opus СОЛО; параллель: запрещена (freeze всего дерева на время спеки); verifier: PSI-замеры до/после
+
 ## KB files to read first
 
 - docs/performance.md (полностью — все разделы и Methodology § 13)
-- docs/server-add-site.md (Caddy `encode` + Cache-Control, для справки — применяет на сервере человек)
+- docs/server-add-site.md (Caddy `encode` + Cache-Control; SSH-доступ — по канону CLAUDE.md, SSH-политика)
 - `next.config.ts`
 - `app/page.tsx` + типовая страница услуги
 
@@ -93,6 +95,8 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 
 ### 9. Caddy-уровень
 
+> SSH-шаги ниже Claude выполняет сам по канону CLAUDE.md (SSH-политика): read-only проверки — предупредив пользователя, что именно собирается сделать; правки Caddy-конфига — только батчированным идемпотентным скриптом после Ask first.
+
 23. Сжатие: `encode gzip zstd` уже в шаблоне `docs/server-add-site.md` § 4. Проверить, что в `/etc/caddy/Caddyfile.d/{site}.caddy` оно есть:
     ```bash
     ssh deploy@{ip} 'grep encode /etc/caddy/Caddyfile.d/{site}.caddy'
@@ -118,26 +122,26 @@ Lighthouse Performance, Accessibility, Best Practices, SEO ≥ 90 на mobile и
 
 ### 11. Console и dev-артефакты
 
-29. Удалить все `console.log` из кода (grep + удалить)
-30. Удалить `loading.tsx` если применимо (см. шаг 21)
-31. Проверить: нет 404 в RSC-prefetch (открыть Network в DevTools)
+30. Удалить все `console.log` из кода (grep + удалить)
+31. Удалить `loading.tsx` если применимо (см. шаг 21)
+32. Проверить: нет 404 в RSC-prefetch (открыть Network в DevTools)
 
 ### 12. Финальный замер
 
-32. Build + deploy
-33. PSI mobile + desktop для главной + 1-2 страниц услуг
-34. Цель: все 4 метрики ≥ 90 (Performance, Accessibility, Best Practices, SEO)
-35. Если что-то < 90 — открыть Lighthouse-репорт, починить конкретные находки
-36. Записать финальные цифры в `.claude/memory/lessons.md` для истории
+33. Build + deploy
+34. PSI mobile + desktop для главной + 1-2 страниц услуг
+35. Цель: все 4 метрики ≥ 90 (Performance, Accessibility, Best Practices, SEO)
+36. Если что-то < 90 — открыть Lighthouse-репорт, починить конкретные находки
+37. Записать финальные цифры в `.claude/memory/lessons.md` для истории
 
 ### 13. Accessibility (WCAG AA)
 
-37. Проверить контрастность через DevTools или WCAG-калькулятор:
+38. Проверить контрастность через DevTools или WCAG-калькулятор:
     - `text-gray-500` (#6b7280) на белом = 3.8:1 — НЕ проходит, заменить на `text-gray-600` (#4b5563) = 5.9:1
     - На тёмном фоне `text-white/40` НЕ проходит, минимум `text-white/60`
-38. Иерархия заголовков: h1 → h2 → h3 без пропусков
-39. Все `<Image>` имеют осмысленный alt
-40. Все интерактивные элементы доступны с клавиатуры (Tab по форме работает)
+39. Иерархия заголовков: h1 → h2 → h3 без пропусков
+40. Все `<Image>` имеют осмысленный alt
+41. Все интерактивные элементы доступны с клавиатуры (Tab по форме работает)
 
 ## Boundaries
 

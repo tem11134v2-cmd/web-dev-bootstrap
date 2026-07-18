@@ -1,0 +1,83 @@
+<!--
+Шаблон deploy/README.md. Спека 01b копирует его в deploy/README.md проекта
+и заполняет плейсхолдеры: {site}, {domain}, {ip}, {ssh-port}, {prod-port}, {dev-port}, {owner}.
+Не дублируй docs/server-*.md — здесь только значения и порядок шагов ЭТОГО сайта.
+-->
+
+# Deploy: {site}
+
+Шаги с SSH может выполнить Claude по канону CLAUDE.md (предупредив, что именно собирается сделать). Человеку остаётся то, что требует чужих GUI: DNS у регистратора, оплата VPS, выдача ключей/паролей.
+
+## Что у тебя уже есть
+- VPS {fresh|существующий} на {ip}, SSH-порт {ssh-port}.
+- Домен `{domain}`{и `dev.{domain}` если есть}, A-запись на {ip} (см. § 1).
+
+## 1. DNS (человек — GUI регистратора)
+A-запись {domain} → {ip}. Если есть dev-поддомен — `dev.{domain}` → {ip}.
+Подробности — `docs/domain-connect.md`. Дождись, пока `dig +short {domain}` показывает {ip} (dig-проверку делает Claude).
+Пункт «дать доступ к DNS / внести A-запись» — в `CLIENT-TODO.md`, если DNS у заказчика.
+
+## 2. VPS bootstrap (если свежий)
+Один раз на VPS:
+1. `ssh-copy-id root@{ip}` с Mac.
+2. `ssh root@{ip} 'CADDY_ADMIN_EMAIL=<email> bash -s' < scripts/bootstrap-vps.sh`.
+Подробности — `docs/server-manual-setup.md`.
+
+## 3. Сгенерировать deploy-ключ на Mac
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/{site}-deploy -N "" -C "{site}-deploy"
+   ```
+Public-часть в authorized_keys на VPS:
+   ```bash
+   ssh-copy-id -i ~/.ssh/{site}-deploy.pub -p {ssh-port} deploy@{ip}
+   ```
+Проверь: `ssh -i ~/.ssh/{site}-deploy -p {ssh-port} deploy@{ip} 'hostname'` отвечает.
+
+## 4. GitHub Environment + Secrets
+GitHub → репо → Settings → Environments → создать `production`. В Secrets положить:
+- `SSH_PRIVATE_KEY` — содержимое `~/.ssh/{site}-deploy` (приватная часть).
+- `SSH_HOST` — `{ip}`.
+- `SSH_USER` — `deploy`.
+- `SSH_PORT` — `{ssh-port}`.
+- `PROD_ENV_FILE` — содержимое локального `.env.production` целиком (multiline). Создавай через
+   ```bash
+   gh secret set PROD_ENV_FILE --env production --repo {owner}/{site} \
+     < ~/projects/{site}/.env.production
+   ```
+- (если используются на билде) `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_YM_ID`, `NEXT_PUBLIC_GA_ID`.
+
+В Variables (repository, не environment): `SITE_NAME` = `{site}`, `PROD_PORT` = `{prod-port}` (и `DEV_PORT` = `{dev-port}` при dev-поддомене). Без порта первый деплой упадёт — `pm2 start` стартанёт без `PORT=`.
+
+После загрузки в GitHub Secrets — удали приватный `~/.ssh/{site}-deploy` с Mac (опционально, безопаснее).
+
+Для dev-поддомена — отдельный environment `dev` с собственным `DEV_ENV_FILE`.
+
+## 5. Папки под релизы и Caddy на VPS
+По `docs/server-add-site.md` § 3 и § 4:
+   ```bash
+   ssh deploy@{ip} 'mkdir -p ~/prod/{site}/releases ~/prod/{site}/shared/data'
+   ```
+`shared/data` — под fallback-лиды (`LEADS_DIR`), деплой её не трогает.
+Скопируй `deploy/{site}.caddy.example` в `/etc/caddy/Caddyfile.d/{site}.caddy`, удали `00-placeholder.caddy` если это первый сайт, `caddy validate && systemctl reload caddy`.
+
+## 6. Тестовый деплой
+Любой коммит, попавший в `main`, триггерит `deploy-prod.yml`. Если `main` защищён — мердж PR из `dev`. Если protection недоступна (private + free GitHub) — `git push origin main` напрямую.
+   ```bash
+   # вариант 1 (main защищён):
+   git checkout dev && git commit --allow-empty -m "chore: trigger first deploy" && git push origin dev
+   gh pr create --base main --head dev --title "First deploy" --body "Triggers initial deploy-prod"
+   gh pr merge --squash --auto
+
+   # вариант 2 (нет protection):
+   git push origin main
+   ```
+GitHub → Actions → `Deploy production` должен пройти за 2–4 мин (build на runner, tar.gz по scp, симлинк). На VPS:
+   ```bash
+   ssh deploy@{ip} 'pm2 logs {site}-prod --lines 20'
+   ```
+Открой `https://{domain}` — должен отвечать 200 свежей версией. Это гейт спеки 01b: пока Actions-run не зелёный и домен не отвечает — к 04 не переходим.
+
+## 7. Записать в реестр
+- `~/ports.md` на VPS: добавить строку с портами и PM2-именами.
+- `.claude/memory/references.md` в проекте: IP, домен, путь `~/prod/{site}/`, PM2-имя.
+- `CLIENT-TODO.md`: закрыть выполненные пункты (DNS), добавить новые, если что-то ещё нужно от заказчика.
